@@ -1,0 +1,32 @@
+# ===== Secrets =====
+.env
+.env.local
+
+# ===== Naver 로그인 세션 (절대 커밋 금지) =====
+.auth/
+user_data/
+storage_state.json
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# ===== 데이터 / 산출물 =====
+data/
+drafts/
+*.sqlite
+*.sqlite3
+*.db
+logs/
+*.log
+
+# ===== OS / 에디터 =====
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/

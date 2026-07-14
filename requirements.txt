@@ -1,0 +1,8 @@
+# Claude API (초안 생성)
+anthropic>=0.40
+
+# 브라우저 자동화 (네이버 게시 — 로그인 세션 재사용)
+playwright>=1.48
+
+# .env 로딩
+python-dotenv>=1.0
