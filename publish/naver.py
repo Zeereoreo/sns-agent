@@ -26,6 +26,13 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+# 한국어 Windows 콘솔(cp949) 출력 깨짐/크래시 방지
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config  # noqa: E402
 from publish.browser import launch_context, DEBUG_DIR  # noqa: E402
@@ -33,16 +40,16 @@ from publish.draft_parser import parse_draft  # noqa: E402
 
 # ── 선택자 (실제 스마트에디터 화면에 맞춰 보정) ──────────────────
 WRITE_URL = "https://blog.naver.com/{blog_id}/postwrite"
+# 스마트에디터 ONE (iframe 없음, 페이지에 직접). 2026-07 실사 보정.
 SEL = {
-    "editor_frame": "#mainFrame",                 # 스마트에디터 iframe
-    "recover_cancel": "button:has-text('취소')",   # '작성 중 글 복구' 팝업 취소
-    "title": ".se-section-documentTitle .se-text-paragraph",  # 제목 영역
-    "body": ".se-section-text .se-text-paragraph",            # 본문 영역
-    "img_button": "button.se-image-toolbar-button, button[data-name='image']",
+    "recover_cancel": ".se-popup-alert-confirm .se-popup-button-cancel, .se-popup-button-cancel",  # 복구 팝업(취소=새로작성)
+    "title": ".se-section-documentTitle",          # 제목 영역(클릭 후 타이핑)
+    "body": ".se-section-text",                    # 본문 영역
+    "img_button": ".se-toolbar-item-image button, button[data-name='image'], button:has-text('사진')",
     "img_input": "input[type='file']",
-    "publish_open": "button:has-text('발행')",     # 상단 발행 패널 열기
-    "tag_input": "#tag-input, input.tag_input",    # 태그 입력
-    "publish_confirm": ".layer_btn_area button:has-text('발행'), button.confirm_btn",
+    "publish_open": "[data-click-area='tpb.publish']",   # 상단 초록 '발행' 버튼
+    "tag_input": "input#tag-input, input.tag_input, input[placeholder*='태그']",
+    "publish_confirm": "[data-click-area='tpb*i.publish'], .confirm_btn__WEaBq",  # 레이어 최종 발행
 }
 
 
@@ -63,17 +70,53 @@ def login():
         ctx = launch_context(p, headed=True)
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         page.goto("https://nid.naver.com/nidlogin.login")
+        # '로그인 상태 유지' 자동 체크 (안 하면 NID_AUT/NID_SES가 세션쿠키라 저장 안 됨)
+        page.wait_for_timeout(1000)
+        for sel in ("label[for='keep']", "#keep", "text=로그인 상태 유지"):
+            try:
+                page.locator(sel).first.click(timeout=2000)
+                break
+            except Exception:
+                continue
         print("=" * 60)
-        print(" 브라우저에서 네이버에 '직접' 로그인하세요 (2차 인증 포함).")
-        print(" 로그인 완료 후, 이 창은 자동으로 닫히지 않습니다.")
-        print(" 완료되면 이 터미널에서 Enter 를 누르세요.")
+        print(" 열린 크롬 창에서 네이버(made-us2)에 직접 로그인하세요. (2차 인증 포함)")
+        print(" ※ '로그인 상태 유지'가 켜져 있는지 확인하세요(자동으로 켜뒀습니다).")
+        print(" 로그인되면 자동 감지해 세션을 저장하고 창을 닫습니다. (최대 6분 대기)")
+        print(" 로그인 끝날 때까지 창을 닫지 마세요.")
         print("=" * 60)
-        try:
-            input()
-        except EOFError:
-            page.wait_for_timeout(120000)  # 비대화형이면 2분 대기
+        saved = False
+        for _ in range(180):  # 180 x 2s = 6분
+            try:
+                names = {c.get("name") for c in ctx.cookies()
+                         if "naver" in (c.get("domain") or "")}
+            except Exception:
+                names = set()
+            if names & {"NID_AUT", "NID_SES"}:
+                saved = True
+                break
+            try:
+                page.wait_for_timeout(2000)
+            except Exception:
+                break
+        if saved:
+            page.wait_for_timeout(1500)  # 쿠키 flush 여유
         ctx.close()
-        print("세션 저장 완료 (user_data/). 이제 publish 를 실행할 수 있어요.")
+        # 저장 검증: 새 컨텍스트로 열어 NID_AUT/NID_SES 가 디스크에 남았는지 확인
+        persisted = False
+        if saved:
+            c2 = launch_context(p, headed=False)
+            try:
+                names = {c.get("name") for c in c2.cookies()
+                         if "naver" in (c.get("domain") or "")}
+                persisted = bool({"NID_AUT", "NID_SES"} & names)
+            finally:
+                c2.close()
+    if persisted:
+        print("[OK] 로그인 세션 저장·검증 완료 (user_data/). publish 실행 가능.")
+    elif saved:
+        print("[!] 로그인은 됐으나 세션 미저장 - 로그인 창의 '로그인 상태 유지'를 켜고 다시 로그인하세요.")
+    else:
+        print("[!] 로그인 감지 안 됨 - 다시 실행해 로그인해 주세요.")
 
 
 # ── 게시 ────────────────────────────────────────────────────────
@@ -95,24 +138,29 @@ def publish(draft_path: str, image_dir: str | None = None,
         page.wait_for_timeout(3000)
         _shot(page, "01_write_opened")
 
-        frame = page.frame_locator(SEL["editor_frame"])
-
         # 로그인 안 됐으면 중단
         if "login" in page.url or "nidlogin" in page.url:
             print("‼ 로그인 세션이 없습니다. 먼저 `python -m publish.naver login` 실행하세요.")
             ctx.close()
             return
 
-        # '작성 중 글 복구' 팝업 취소
+        # '작성 중 글 복구' 확인 팝업 먼저 닫기(취소=새로 작성) — 클릭을 가로막음
+        page.wait_for_timeout(1200)
         try:
-            frame.locator(SEL["recover_cancel"]).first.click(timeout=3000)
+            page.locator(SEL["recover_cancel"]).first.click(timeout=3000)
+            page.wait_for_timeout(600)
         except Exception:
             pass
+
+        # 도움말/툴팁 오버레이 닫기
+        for _ in range(3):
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
         _pause()
 
         # 제목 입력
         try:
-            frame.locator(SEL["title"]).first.click()
+            page.locator(SEL["title"]).first.click()
             _pause()
             page.keyboard.type(data["title"], delay=random.randint(30, 90))
             _shot(page, "02_title")
@@ -122,13 +170,13 @@ def publish(draft_path: str, image_dir: str | None = None,
 
         # 본문 입력
         try:
-            frame.locator(SEL["body"]).first.click()
+            page.locator(SEL["body"]).first.click()
             _pause()
             img_i = 0
             for blk in data["blocks"]:
                 if blk["kind"] == "image":
                     if image_dir and img_i < len(images):
-                        _insert_image(page, frame, images[img_i])
+                        _insert_image(page, images[img_i])
                         img_i += 1
                     continue
                 page.keyboard.type(blk["text"], delay=random.randint(15, 45))
@@ -173,11 +221,11 @@ def publish(draft_path: str, image_dir: str | None = None,
         ctx.close()
 
 
-def _insert_image(page, frame, img_path: Path):
-    """이미지 1장 삽입 (파일 선택 방식). 선택자 보정 필요."""
+def _insert_image(page, img_path: Path):
+    """이미지 1장 삽입 (파일 선택 방식)."""
     try:
         with page.expect_file_chooser(timeout=5000) as fc:
-            frame.locator(SEL["img_button"]).first.click()
+            page.locator(SEL["img_button"]).first.click()
         fc.value.set_files(str(img_path))
         page.wait_for_timeout(1500)
     except Exception as e:
