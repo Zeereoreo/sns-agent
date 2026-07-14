@@ -19,6 +19,7 @@ venv/
 # ===== 데이터 / 산출물 =====
 data/
 drafts/
+.playwright-mcp/
 *.sqlite
 *.sqlite3
 *.db
