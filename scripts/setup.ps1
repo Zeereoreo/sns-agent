@@ -1,6 +1,7 @@
 # SNS Agent 개발환경 자동 셋업 (Windows PowerShell)
 # 사용:  .\scripts\setup.ps1
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8  # 한글 출력 깨짐 방지
 $root = Split-Path -Parent $PSScriptRoot
 
 Write-Host "==> 1) 가상환경(.venv) 생성" -ForegroundColor Cyan

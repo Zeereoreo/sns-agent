@@ -2,6 +2,7 @@
 # 사용:  .\scripts\push.ps1 "커밋 메시지"
 param([string]$Message = "update")
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8  # 한글 출력 깨짐 방지
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
