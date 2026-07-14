@@ -1,0 +1,68 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - heading [level=1] [ref=e4]:
+      - link "naver" [ref=e5] [cursor=pointer]:
+        - /url: https://m.naver.com/
+      - link "blog" [ref=e8] [cursor=pointer]:
+        - /url: /Recommendation.naver
+    - generic [ref=e11]:
+      - link "이 블로그 검색" [ref=e12] [cursor=pointer]:
+        - /url: https://m.blog.naver.com/PostSearchList.naver?blogId=made-us
+      - button "MY메뉴 열기" [ref=e14] [cursor=pointer]
+  - generic [ref=e16]:
+    - heading "naver blog" [level=1] [ref=e17]:
+      - link "naver":
+        - /url: https://m.naver.com/
+      - link "blog" [ref=e19] [cursor=pointer]:
+        - /url: /Recommendation.naver
+    - generic [ref=e22]:
+      - link "이 블로그 검색" [ref=e23] [cursor=pointer]:
+        - /url: https://m.blog.naver.com/PostSearchList.naver?blogId=made-us
+      - button "MY메뉴 열기" [ref=e25] [cursor=pointer]
+    - heading [level=2] [ref=e28]:
+      - button "카테고리 이동" [ref=e30] [cursor=pointer]
+      - link "commercial art studio" [ref=e34] [cursor=pointer]:
+        - /url: https://m.blog.naver.com/PostList.naver?blogId=made-us&trackingCode=blog_bloghome
+  - generic [ref=e37]:
+    - generic [ref=e38]:
+      - generic [ref=e39]: 오늘 4 전체 102,358
+      - heading [level=2] [ref=e41]:
+        - link "commercial art studio" [ref=e42] [cursor=pointer]:
+          - /url: /made-us
+    - generic [ref=e43]:
+      - link [ref=e45] [cursor=pointer]:
+        - /url: https://blogpfthumb-phinf.pstatic.net/MjAyMjAyMDZfMzEg/MDAxNjQ0MTI4MzE2NzY1.EN5zR-mG47kBvIGoTV5t-QDPalzKh037h2tRVYcfH_og.QBhc0D-HRRg0AlRLn1WkmZTkLwWrFugusexH_kGK4_og.PNG.lyric8232/profile.png/profile.png
+        - img "메이드어스" [ref=e47]
+      - generic [ref=e48]:
+        - link "메이드어스" [ref=e50] [cursor=pointer]:
+          - /url: /made-us
+        - generic [ref=e51]:
+          - generic [ref=e52]: 인테리어·DIYㆍ
+          - generic [ref=e53]: 962명의 이웃
+          - generic [ref=e54]:
+            - text: ㆍ
+            - link "사업자정보" [ref=e55] [cursor=pointer]:
+              - /url: https://m.blog.naver.com/Business.naver?blogId=made-us
+    - generic [ref=e56]:
+      - button "이웃추가" [ref=e58] [cursor=pointer]
+      - button "카테고리" [ref=e61] [cursor=pointer]
+      - generic [ref=e63]:
+        - link "안부글" [ref=e64] [cursor=pointer]:
+          - /url: https://m.blog.naver.com/GuestbookList.naver?blogId=made-us
+        - link "이웃목록" [ref=e66] [cursor=pointer]:
+          - /url: https://m.blog.naver.com/BuddyList.naver?blogId=made-us
+        - button "앱알림 비활성화됨, 앱알림 활성화하기" [ref=e68] [cursor=pointer]
+  - generic [ref=e70]:
+    - generic [ref=e72]:
+      - heading "소개" [level=3] [ref=e73]
+      - paragraph [ref=e74]: Combination of technology and design 공감하고 소통하고 만들다.
+    - generic [ref=e77]:
+      - tablist [ref=e79]:
+        - tab "블로그" [selected] [ref=e80] [cursor=pointer]
+        - tab "클립" [ref=e81] [cursor=pointer]
+      - generic [ref=e84]:
+        - button "사진만 보기" [ref=e85] [cursor=pointer]
+        - button "목록형 보기" [ref=e87] [cursor=pointer]
+        - button "카드형 보기" [ref=e89] [cursor=pointer]
+      - generic [ref=e95]:
+        - list
