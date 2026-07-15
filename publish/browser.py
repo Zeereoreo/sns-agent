@@ -27,6 +27,13 @@ def launch_context(p, headed: bool = True):
     )
     # 실제 Chrome 우선(탐지 회피), 미설치 시 번들 Chromium
     try:
-        return p.chromium.launch_persistent_context(channel="chrome", **common)
+        ctx = p.chromium.launch_persistent_context(channel="chrome", **common)
     except Exception:
-        return p.chromium.launch_persistent_context(**common)
+        ctx = p.chromium.launch_persistent_context(**common)
+    # 클립보드 붙여넣기(이미지 자동 삽입)용 권한
+    try:
+        ctx.grant_permissions(["clipboard-read", "clipboard-write"],
+                              origin="https://blog.naver.com")
+    except Exception:
+        pass
+    return ctx

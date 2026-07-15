@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import random
 import sys
 import time
@@ -243,12 +244,21 @@ def publish(draft_path: str, image_dir: str | None = None,
 
 
 def _insert_image(page, img_path: Path):
-    """이미지 1장 삽입 (파일 선택 방식)."""
+    """클립보드 붙여넣기로 이미지 삽입 (파일선택창 우회 — 네이버에서 유일하게 안정적).
+
+    커서는 본문 입력 흐름상 이미 본문에 있으므로 재클릭하지 않고 현재 위치에 붙여넣는다.
+    """
     try:
-        with page.expect_file_chooser(timeout=5000) as fc:
-            page.locator(SEL["img_button"]).first.click()
-        fc.value.set_files(str(img_path))
-        page.wait_for_timeout(1500)
+        b64 = base64.b64encode(img_path.read_bytes()).decode()
+        mime = "image/jpeg" if img_path.suffix.lower() in (".jpg", ".jpeg") else "image/png"
+        page.evaluate(
+            """async ([b64, mime]) => {
+                const res = await fetch('data:' + mime + ';base64,' + b64);
+                const blob = await res.blob();
+                await navigator.clipboard.write([new ClipboardItem({[mime]: blob})]);
+            }""", [b64, mime])
+        page.keyboard.press("Control+V")
+        page.wait_for_timeout(random.randint(1800, 2800))  # 업로드·삽입 대기
     except Exception as e:
         print(f"  이미지 삽입 실패({img_path.name}):", e)
 
