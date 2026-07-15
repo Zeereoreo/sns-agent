@@ -45,7 +45,7 @@ SEL = {
     "recover_cancel": ".se-popup-alert-confirm .se-popup-button-cancel, .se-popup-button-cancel",  # 복구 팝업(취소=새로작성)
     "title": ".se-section-documentTitle",          # 제목 영역(클릭 후 타이핑)
     "body": ".se-section-text",                    # 본문 영역
-    "img_button": ".se-toolbar-item-image button, button[data-name='image'], button:has-text('사진')",
+    "img_button": ".se-image-toolbar-button, button[data-name='image']",
     "img_input": "input[type='file']",
     "publish_open": "[data-click-area='tpb.publish']",   # 상단 초록 '발행' 버튼
     "tag_input": "input#tag-input, input.tag_input, input[placeholder*='태그']",
@@ -121,7 +121,7 @@ def login():
 
 # ── 게시 ────────────────────────────────────────────────────────
 def publish(draft_path: str, image_dir: str | None = None,
-            dry_run: bool = True, headed: bool = True) -> None:
+            dry_run: bool = True, headed: bool = True, review: bool = False) -> None:
     blog_id = config.NAVER_BLOG_ID or "made-us"
     data = parse_draft(draft_path)
     images = []
@@ -205,6 +205,27 @@ def publish(draft_path: str, image_dir: str | None = None,
             print("발행 패널/태그 실패(선택자 보정 필요):", e)
             _shot(page, "04_publish_FAIL")
 
+        if review:
+            # 발행 설정 패널 닫기(이미지는 본문에 직접 넣어야 하므로)
+            for _ in range(2):
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(300)
+            print("=" * 60)
+            print(" 제목·본문·태그 입력 완료! 이 창에서 직접:")
+            print("  1) 원하는 이미지를 본문에 드래그드롭으로 넣고")
+            print("  2) 검토 후 오른쪽 위 초록 '발행' 클릭 (태그는 이미 입력됨)")
+            print(" 완료 후 창을 닫으면 종료됩니다. (최대 15분 대기)")
+            print("=" * 60)
+            try:
+                page.wait_for_event("close", timeout=900000)
+            except Exception:
+                pass
+            try:
+                ctx.close()
+            except Exception:
+                pass
+            return
+
         if dry_run:
             print("✅ dry-run: 발행 직전까지 진행. drafts/_debug/ 스크린샷을 확인하세요.")
             page.wait_for_timeout(2000)
@@ -241,12 +262,15 @@ def main():
     pp.add_argument("--images", default=None)
     pp.add_argument("--dry-run", action="store_true")
     pp.add_argument("--headless", action="store_true")
+    pp.add_argument("--review", action="store_true",
+                    help="제목·본문·태그 채우고 멈춤 → 사람이 이미지 넣고 발행")
     a = ap.parse_args()
 
     if a.cmd == "login":
         login()
     else:
-        publish(a.draft, a.images, dry_run=a.dry_run, headed=not a.headless)
+        publish(a.draft, a.images, dry_run=a.dry_run,
+                headed=(a.review or not a.headless), review=a.review)
 
 
 if __name__ == "__main__":
