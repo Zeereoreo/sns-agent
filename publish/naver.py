@@ -122,12 +122,16 @@ def login():
 
 # ── 게시 ────────────────────────────────────────────────────────
 def publish(draft_path: str, image_dir: str | None = None,
+            image_paths: list | None = None,
             dry_run: bool = True, headed: bool = True, review: bool = False) -> None:
     blog_id = config.NAVER_BLOG_ID or "made-us"
     data = parse_draft(draft_path)
-    images = []
-    if image_dir:
+    if image_paths is not None:
+        images = [Path(p) for p in image_paths]
+    elif image_dir:
         images = sorted(Path(image_dir).glob("*.png")) + sorted(Path(image_dir).glob("*.jpg"))
+    else:
+        images = []
 
     print(f"[게시 준비] 제목: {data['title']}")
     print(f"  블록 {len(data['blocks'])}개 / 태그 {len(data['tags'])}개 / 이미지풀 {len(images)}장 / dry_run={dry_run}")
