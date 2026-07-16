@@ -1,53 +1,66 @@
-# SNS Agent — 네이버 블로그 자동 콘텐츠 에이전트 (MVP)
+# SNS Agent — 네이버 블로그 무인 발행 시스템
 
-사업 아이템을 주제로 네이버 블로그에 **콘텐츠를 자동 생성·게시**하고, 성과를 측정해
-개선 루프를 도는 에이전트. 최종 목표는 월 방문자 1000명(≈ 하루 30~35명).
+메이드어스(made-us) 콘텐츠를 **자동 생성·이미지 삽입·태그·발행**하는 에이전트.
+현재 **하루 3회 무인 발행**까지 동작합니다. (테스트 블로그: made-us2)
 
-> ⚠️ **먼저 읽어주세요.** 네이버는 공식 게시 API가 없고 자동 게시를 강하게 탐지합니다.
-> 계정 정지/저품질 위험과 현실적 기대치는 계획서를 참고하세요:
-> `~/.claude/plans/calm-painting-platypus.md`
+> ⚠️ 현실: 네이버는 자동 게시를 탐지합니다. 안전 페이싱(하루 3회·시간 분산)을 지키고,
+> 검색의도형·정보성 글로 갑니다. 상세 리스크·전략은 `~/.claude/plans/calm-painting-platypus.md`.
 
-## 요구사항
-- Windows + PowerShell
-- Python 3.11+ (현재 3.14 확인됨)
-- Claude(Anthropic) API 키 — https://console.anthropic.com/
+## 지금 상태 (무엇이 되나)
+- ✅ 로그인 세션 재사용(사람이 1회 로그인) · 제목·본문·**이미지(클립보드)**·태그·발행 전 과정 자동
+- ✅ 초안 30편(세그먼트 A 방송피켓 / B 클럽버킷 / C 간판) + 인포그래픽 6종
+- ✅ 스케줄러(큐·하루상한·주제분산) + Windows 작업 3회/일 등록됨
+- ✅ 실제 발행 1건 검증 완료(a02)
 
-## 빠른 시작
+## 폴더 구조
+```
+publish/naver.py     네이버 게시 자동화(login / publish / --review)
+publish/images.py    이미지 선택(인박스>인포그래픽>사진풀 순환)
+publish/draft_parser.py  초안 md → 제목/태그/블록
+scheduler.py         무인 발행(run / status)
+drafts/*.md          초안 30편 (gitignore)
+drafts/images/       인포그래픽 PNG (내가 생성)
+drafts/photos/       실물 사진 풀 (← 여기에 사진 넣으면 자동 재활용)
+drafts/photos/inbox/ 새 사진 (여기 넣으면 다음 글에 우선 사용)
+data/publish_state.json  발행 이력  |  data/scheduler.log  실행 로그
+run_scheduler.cmd    작업 스케줄러가 호출하는 실행 래퍼
+```
+
+## 사진 넣는 법 (당신 몫)
+- **평소**: `drafts/photos/` 에 실물 제품 사진을 넣어두면 글마다 자동 재활용.
+- **새 사진**: `drafts/photos/inbox/` 에 넣으면 다음 발행 글에 우선 삽입(후 used로 이동).
+- 사진이 없어도 주제 매칭 인포그래픽으로 게시됩니다.
+
+## 운영 명령
 ```powershell
-# 1) 개발환경 자동 셋업 (venv + 의존성 + Playwright + .env 생성 + 검증)
-.\scripts\setup.ps1
+# 진행 현황
+.\.venv\Scripts\python.exe scheduler.py status
 
-# 2) .env 파일을 열어 ANTHROPIC_API_KEY 를 입력
+# 수동 1회 발행(테스트: --dry-run, 실제: 빼기)
+.\.venv\Scripts\python.exe scheduler.py run --dry-run
 
-# 3) 설정 검증 (API 호출 없음 = 무료)
-.\.venv\Scripts\python.exe verify_setup.py
+# 반자동(에디터에 다 채우고 멈춤 → 직접 이미지·발행)
+.\.venv\Scripts\python.exe -m publish.naver publish --draft drafts/<파일>.md --review
+
+# 로그인 다시(세션 만료 시)
+.\.venv\Scripts\python.exe -m publish.naver login
 ```
 
-## API 키 관리 방식
-- 실제 키는 **`.env` 파일에만** 저장하며 git에 올라가지 않습니다(`.gitignore`).
-- `.env.example` 은 템플릿으로만 공유합니다. (`Copy-Item .env.example .env`)
-- 시스템 환경변수 `ANTHROPIC_API_KEY` 가 있으면 그것도 자동 사용됩니다.
-
-## GitHub에 올리기
+## 무인 스케줄 (등록됨)
+매일 **09:07 / 13:23 / 18:41** 에 자동 발행(작업명 `SNS-Agent-1/2/3`).
 ```powershell
-.\scripts\push.ps1 "커밋 메시지"
-```
-원격: https://github.com/Zeereoreo/sns-agent
-
-## 프로젝트 구조
-```
-config.py            # .env 로드 + 전역 설정
-verify_setup.py      # 환경 점검(무료)
-content/             # 키워드 선정 -> 초안 생성 -> 품질 게이트
-publish/naver.py     # Playwright 네이버 게시 (로그인 세션 재사용)
-analytics/           # 성과 수집 / 피드백 / 저품질 서킷브레이커
-scheduler.py         # 하루 1회 파이프라인 실행
-scripts/             # setup.ps1(셋업), push.ps1(업로드)
+# 잠시 멈추기 / 다시 켜기
+schtasks /change /tn "SNS-Agent-1-Morning" /disable
+schtasks /change /tn "SNS-Agent-1-Morning" /enable
+# (2-Noon, 3-Evening 도 동일)
 ```
 
-## 진행 단계
-- **Phase 0** 사업 아이템 예시 확보 → 콘텐츠 페르소나/키워드 세팅 *(사용자 입력 대기)*
-- **Phase 1** 콘텐츠 생성 엔진 (게시 없이 파일로 초안 출력)
-- **Phase 2** 네이버 게시 자동화 (수동 트리거로 1건 검증)
-- **Phase 3** 완전 자동 루프 + 측정 + 서킷브레이커
-- **Phase 4** 유튜브 → 인스타 확장
+## 실서비스 전환 (made-us 클라이언트 블로그로)
+1. `.env` 의 `NAVER_BLOG_ID` 를 실제 블로그 아이디로 변경
+2. `python -m publish.naver login` 으로 그 계정 로그인
+3. `data/publish_state.json` 초기화(발행 이력 리셋)
+
+## 한계 / 다음 개선
+- 이미지 자동삽입은 **클립보드 붙여넣기**로 해결(파일선택창은 hang). 원본 사진은 사용자가 폴더에 공급.
+- 완전 무인으로 "글 생성"까지 하려면 Anthropic API 키 필요(현재는 초안을 미리 써둔 큐 방식).
+- B세그먼트 글은 이미지 슬롯 4개인데 현재 인포그래픽 1장만 → 사진 풀 채우면 자동 보강.
