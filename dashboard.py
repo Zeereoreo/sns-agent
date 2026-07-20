@@ -15,7 +15,7 @@ import re
 import subprocess
 import sys
 import webbrowser
-from datetime import date
+from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -120,6 +120,7 @@ def collect() -> dict:
                    key=lambda p: p.stat().st_mtime, reverse=True)[:6]
 
     return {
+        "stamp": f"{datetime.now():%Y-%m-%d %H:%M}",
         "blog": config.NAVER_BLOG_ID or "(미설정)",
         "max_per_day": config.MAX_POSTS_PER_DAY,
         "today_ok": sum(1 for e in state["log"] if e.get("date") == today and e.get("ok")),
@@ -170,7 +171,8 @@ tr:hover td{background:#151920}
 STATUS_BADGE = {"done": ("발행됨", "ok"), "next": ("다음 차례", "next"), "wait": ("대기", "mut")}
 
 
-def render(d: dict) -> str:
+def render(d: dict, shot_base: str = "/shot/") -> str:
+    """shot_base: 서버 모드는 '/shot/', 스냅샷 파일 모드는 상대경로."""
     e = html.escape
     alerts = []
     blocked = [t["name"] for t in d["tasks"] if t.get("battery_block")]
@@ -213,14 +215,19 @@ def render(d: dict) -> str:
         for x in d["log"]) or "<tr><td colspan=5>기록 없음</td></tr>"
 
     shots = "".join(
-        f'<figure><img src="/shot/{e(s)}" alt="{e(s)}"><figcaption>{e(s)}</figcaption></figure>'
+        f'<figure><img src="{shot_base}{e(s)}" alt="{e(s)}"><figcaption>{e(s)}</figcaption></figure>'
         for s in d["shots"]) or "<p style='color:#8b93a1'>스크린샷 없음</p>"
 
+    live = shot_base == "/shot/"
+    refresh = '<meta http-equiv="refresh" content="30">' if live else ""
+    sub = ("30초마다 자동 새로고침 · 읽기 전용" if live
+           else f"고정 스냅샷 ({d['stamp']} 기준) · 최신화하려면 snapshot 다시 실행")
+
     return f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
-<title>SNS Agent 대시보드</title><meta http-equiv="refresh" content="30">
+<title>SNS Agent 대시보드</title>{refresh}
 <style>{CSS}</style></head><body><div class="wrap">
 <h1>SNS Agent 대시보드</h1>
-<div class="sub">30초마다 자동 새로고침 · 읽기 전용</div>
+<div class="sub">{sub}</div>
 {alert_html}{cards}
 <h2>자동 실행 스케줄</h2>
 <table><tr><th>작업</th><th>다음 실행</th><th>마지막 실행</th><th>마지막 결과</th></tr>{trows}</table>
@@ -272,7 +279,20 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-open", action="store_true")
+    ap.add_argument("--snapshot", action="store_true",
+                    help="서버 없이 data/dashboard.html 파일 하나로 저장")
     a = ap.parse_args()
+
+    if a.snapshot:
+        out = ROOT / "data" / "dashboard.html"
+        out.parent.mkdir(exist_ok=True)
+        # 스크린샷은 이 파일 기준 상대경로로 참조(브라우저에서 file:// 로 바로 열림)
+        out.write_text(render(collect(), shot_base="../drafts/_debug/"), encoding="utf-8")
+        print(f"저장: {out}")
+        if not a.no_open:
+            webbrowser.open(out.as_uri())
+        return
+
     url = f"http://127.0.0.1:{a.port}"
     print(f"대시보드: {url}  (Ctrl+C 종료)")
     if not a.no_open:
