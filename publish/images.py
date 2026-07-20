@@ -90,8 +90,12 @@ def pick_images(draft_path, n: int) -> tuple[list[Path], list[Path]]:
         picks.append(p)
         used_inbox.append(p)
 
-    # 3) 사진 풀 순환 재활용
+    # 3) 사진 풀 순환 재활용 — 같은 세그먼트(파일명 a_/b_/c_ 접두사) 사진을 우선한다.
+    #    간판 글에 클럽 버킷 사진이 붙는 것을 막는다.
     pool = [p for p in _imgs(PHOTO_DIR) if p.parent == PHOTO_DIR]
+    seg = code[0] if code and code[0] in "abc" else "a"
+    same_seg = [p for p in pool if p.name.startswith(f"{seg}_")]
+    pool = same_seg or pool
     if pool and len(picks) < n:
         start = _load_rot()
         steps = 0
