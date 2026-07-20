@@ -29,8 +29,10 @@ except Exception:
     pass
 
 import config  # noqa: E402
-from publish import naver, images as imgmod  # noqa: E402
+from publish import images as imgmod  # noqa: E402
 from publish.draft_parser import parse_draft  # noqa: E402
+# publish.naver 는 playwright 를 끌어온다. status/대시보드는 브라우저가 필요 없으므로
+# run() 안에서만 늦게 임포트한다.
 
 DRAFTS = ROOT / "drafts"
 STATE = ROOT / "data" / "publish_state.json"
@@ -88,22 +90,38 @@ def run(dry_run: bool = True) -> None:
     picks, used_inbox = imgmod.pick_images(nxt, n)
     print(f"[스케줄러] 대상: {nxt.name} | 이미지 {len(picks)}장 | dry_run={dry_run}")
 
+    from publish import naver  # noqa: PLC0415 (playwright 지연 임포트)
+
     ok = False
+    reason = None
+    res: dict = {}
     try:
-        naver.publish(str(nxt), image_paths=[str(x) for x in picks],
-                      dry_run=dry_run, headed=False)
-        ok = not dry_run
+        res = naver.publish(str(nxt), image_paths=[str(x) for x in picks],
+                            dry_run=dry_run, headed=False) or {}
+        ok = bool(res.get("ok"))
+        reason = res.get("reason")
     except Exception as e:
         print("발행 중 오류:", e)
+        reason = f"exception: {e}"
 
+    # 발행이 확인된 경우에만 큐에서 뺀다. 확인 안 되면 다음 실행에서 다시 시도.
     if ok:
         s["published"].append(nxt.name)
         imgmod.mark_inbox_used(used_inbox)
     s["log"].append({"date": today, "time": datetime.now().strftime("%H:%M"),
                      "draft": nxt.name, "ok": ok, "dry": dry_run,
-                     "images": len(picks)})
+                     "images": res.get("images_inserted", 0),
+                     "planned_images": len(picks),
+                     "reason": reason, "url": res.get("url")})
     _save_state(s)
-    print("완료." if ok else ("dry-run 완료." if dry_run else "발행 실패."))
+    if ok:
+        print("완료.", res.get("url") or "")
+    elif dry_run:
+        print("dry-run 완료.")
+    else:
+        print(f"발행 실패({reason}) — 초안은 큐에 남겨둡니다. 다음 실행에서 재시도.")
+        if reason == "session_expired":
+            print("  → 세션 만료입니다. `python -m publish.naver login` 으로 다시 로그인하세요.")
 
 
 def status() -> None:

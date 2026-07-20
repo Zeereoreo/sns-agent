@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import base64
 import random
+import re
 import sys
 import time
 from pathlib import Path
@@ -121,11 +122,37 @@ def login():
 
 
 # ── 게시 ────────────────────────────────────────────────────────
+def _verify_published(page, blog_id: str, title: str) -> str | None:
+    """블로그 목록에서 방금 쓴 제목을 찾아 '진짜 올라갔는지' 확인하고 URL을 돌려준다.
+
+    발행 버튼 클릭 성공 != 게시 성공. 클릭만 믿으면 세션 만료·검증 실패 때
+    올라가지도 않은 글을 발행됨으로 기록하게 된다.
+    """
+    key = re.sub(r"\s+", " ", title).strip()[:15]
+    if not key:
+        return None
+    try:
+        page.goto(f"https://m.blog.naver.com/{blog_id}", timeout=20000)
+        page.wait_for_timeout(2500)
+        body = re.sub(r"\s+", " ", page.inner_text("body"))
+        if key in body:
+            return page.url
+    except Exception as e:
+        print("  발행 확인 중 오류:", e)
+    return None
+
+
 def publish(draft_path: str, image_dir: str | None = None,
             image_paths: list | None = None,
-            dry_run: bool = True, headed: bool = True, review: bool = False) -> None:
+            dry_run: bool = True, headed: bool = True, review: bool = False) -> dict:
+    """결과를 dict 로 돌려준다: {ok, reason, images_inserted, url, title}.
+
+    ok=True 는 '블로그 목록에서 글을 확인함' 을 뜻한다(클릭 성공이 아니라).
+    """
     blog_id = config.NAVER_BLOG_ID or "made-us"
     data = parse_draft(draft_path)
+    result = {"ok": False, "reason": None, "images_inserted": 0,
+              "url": None, "title": data["title"]}
     if image_paths is not None:
         images = [Path(p) for p in image_paths]
     elif image_dir:
@@ -147,7 +174,8 @@ def publish(draft_path: str, image_dir: str | None = None,
         if "login" in page.url or "nidlogin" in page.url:
             print("‼ 로그인 세션이 없습니다. 먼저 `python -m publish.naver login` 실행하세요.")
             ctx.close()
-            return
+            result["reason"] = "session_expired"
+            return result
 
         # '작성 중 글 복구' 확인 팝업 먼저 닫기(취소=새로 작성) — 클릭을 가로막음
         page.wait_for_timeout(1200)
@@ -172,6 +200,9 @@ def publish(draft_path: str, image_dir: str | None = None,
         except Exception as e:
             print("제목 입력 실패(선택자 보정 필요):", e)
             _shot(page, "02_title_FAIL")
+            ctx.close()   # 제목 없는 글을 올리느니 중단한다
+            result["reason"] = "title_failed"
+            return result
 
         # 본문 입력
         try:
@@ -194,12 +225,16 @@ def publish(draft_path: str, image_dir: str | None = None,
         except Exception as e:
             print("본문 입력 실패(선택자 보정 필요):", e)
             _shot(page, "03_body_FAIL")
+            ctx.close()   # 본문 없는 글을 올리느니 중단한다
+            result["reason"] = "body_failed"
+            return result
 
         # 시도 횟수가 아니라 에디터에 실제로 들어간 이미지 수를 확인한다.
         try:
             inserted = page.locator(".se-component.se-image").count()
         except Exception:
             inserted = -1
+        result["images_inserted"] = max(inserted, 0)
         if images and inserted == 0:
             print(f"  ⚠ 이미지 {len(images)}장을 넣으려 했으나 본문에 0장 — 삽입 실패")
         elif inserted >= 0 and inserted < len(images):
@@ -243,22 +278,35 @@ def publish(draft_path: str, image_dir: str | None = None,
                 ctx.close()
             except Exception:
                 pass
-            return
+            result["reason"] = "review"
+            return result
 
         if dry_run:
             print("✅ dry-run: 발행 직전까지 진행. drafts/_debug/ 스크린샷을 확인하세요.")
             page.wait_for_timeout(2000)
+            result["reason"] = "dry_run"
         else:
             try:
                 page.locator(SEL["publish_confirm"]).first.click(timeout=5000)
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(4000)
                 _shot(page, "06_published")
-                print("🚀 발행 완료.")
             except Exception as e:
                 print("발행 버튼 실패(선택자 보정 필요):", e)
                 _shot(page, "06_publish_FAIL")
+                result["reason"] = "publish_click_failed"
+
+            # 클릭 성공 여부와 무관하게, 블로그에 실제로 떴는지로 판정한다.
+            url = _verify_published(page, blog_id, data["title"])
+            if url:
+                result["ok"] = True
+                result["url"] = url
+                print(f"🚀 발행 완료(확인됨). 이미지 {result['images_inserted']}장")
+            else:
+                result["reason"] = result["reason"] or "not_found_after_publish"
+                print("‼ 발행했지만 블로그 목록에서 글을 찾지 못했습니다:", result["reason"])
 
         ctx.close()
+        return result
 
 
 def _insert_image(page, img_path: Path):
