@@ -180,7 +180,9 @@ def publish(draft_path: str, image_dir: str | None = None,
             img_i = 0
             for blk in data["blocks"]:
                 if blk["kind"] == "image":
-                    if image_dir and img_i < len(images):
+                    # images 는 image_paths/image_dir 어느 쪽으로 받았든 채워져 있다.
+                    # (예전엔 image_dir 을 조건으로 봐서 스케줄러 경로의 이미지가 통째로 누락됐음)
+                    if img_i < len(images):
                         _insert_image(page, images[img_i])
                         img_i += 1
                     continue
@@ -192,6 +194,18 @@ def publish(draft_path: str, image_dir: str | None = None,
         except Exception as e:
             print("본문 입력 실패(선택자 보정 필요):", e)
             _shot(page, "03_body_FAIL")
+
+        # 시도 횟수가 아니라 에디터에 실제로 들어간 이미지 수를 확인한다.
+        try:
+            inserted = page.locator(".se-component.se-image").count()
+        except Exception:
+            inserted = -1
+        if images and inserted == 0:
+            print(f"  ⚠ 이미지 {len(images)}장을 넣으려 했으나 본문에 0장 — 삽입 실패")
+        elif inserted >= 0 and inserted < len(images):
+            print(f"  ⚠ 이미지 {len(images)}장 중 {inserted}장만 삽입됨")
+        else:
+            print(f"  이미지 삽입 확인: {inserted}장")
 
         # 발행 패널 → 태그 → 발행
         try:

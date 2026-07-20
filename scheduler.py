@@ -68,6 +68,8 @@ def _image_slots(draft: Path) -> int:
 
 
 def run(dry_run: bool = True) -> None:
+    # 로그 구분선은 여기서 찍는다(배치 echo 로 찍으면 cp949 라 UTF-8 로그와 섞임).
+    print(f"\n===== {datetime.now():%Y-%m-%d %H:%M:%S} =====")
     s = _load_state()
     today = str(date.today())
     published = set(s["published"])
