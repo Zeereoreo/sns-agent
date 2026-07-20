@@ -317,11 +317,20 @@ def _insert_image(page, img_path: Path):
     try:
         b64 = base64.b64encode(img_path.read_bytes()).decode()
         mime = "image/jpeg" if img_path.suffix.lower() in (".jpg", ".jpeg") else "image/png"
+        # 클립보드 API 는 image/png 만 쓰기 허용한다(JPEG 는 NotAllowedError).
+        # 사진 풀이 대부분 .jpg 라 canvas 로 PNG 변환해서 붙여넣는다.
         page.evaluate(
             """async ([b64, mime]) => {
                 const res = await fetch('data:' + mime + ';base64,' + b64);
-                const blob = await res.blob();
-                await navigator.clipboard.write([new ClipboardItem({[mime]: blob})]);
+                let blob = await res.blob();
+                if (blob.type !== 'image/png') {
+                    const bmp = await createImageBitmap(blob);
+                    const cv = document.createElement('canvas');
+                    cv.width = bmp.width; cv.height = bmp.height;
+                    cv.getContext('2d').drawImage(bmp, 0, 0);
+                    blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+                }
+                await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
             }""", [b64, mime])
         page.keyboard.press("Control+V")
         page.wait_for_timeout(random.randint(1800, 2800))  # 업로드·삽입 대기
