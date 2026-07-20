@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import date
+from datetime import date, datetime
 from itertools import zip_longest
 from pathlib import Path
 
@@ -97,7 +97,8 @@ def run(dry_run: bool = True) -> None:
     if ok:
         s["published"].append(nxt.name)
         imgmod.mark_inbox_used(used_inbox)
-    s["log"].append({"date": today, "draft": nxt.name, "ok": ok, "dry": dry_run,
+    s["log"].append({"date": today, "time": datetime.now().strftime("%H:%M"),
+                     "draft": nxt.name, "ok": ok, "dry": dry_run,
                      "images": len(picks)})
     _save_state(s)
     print("완료." if ok else ("dry-run 완료." if dry_run else "발행 실패."))
