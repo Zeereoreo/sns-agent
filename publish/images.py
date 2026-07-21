@@ -31,6 +31,11 @@ INFOGRAPHIC_MAP = {
     "a08": "nickname-checklist.png",   # 크루 닉네임 → 닉네임 체크리스트
     "a11": "platform-compare.png",     # 쇼츠/틱톡 → 플랫폼 비교
     "c30": "process-flow.png",         # 간판 제작 과정 → 공정 플로우
+    # 신규 제작 인포그래픽(2026-07-21)
+    "c23": "sign-cost.png",            # 아크릴 간판 비용
+    "c29": "sign-cost.png",            # 소상공인 간판 비용 절약
+    "b24": "bucket-care.png",          # 아이스버킷 관리
+    "b23": "club-led-set.png",         # 테이블 LED 조합
 }
 # 세그먼트 기본 인포그래픽(주제 매칭 없을 때)
 SEGMENT_DEFAULT = {"a": "process-flow.png", "b": "bucket-compare.png", "c": "sign-compare.png"}
