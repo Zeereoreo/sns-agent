@@ -192,6 +192,16 @@ def _run(dry_run: bool = True) -> None:
         print(f"발행 실패({reason}) — 초안은 큐에 남겨둡니다. 다음 실행에서 재시도.")
         if reason == "session_expired":
             print("  → 세션 만료입니다. `python -m publish.naver login` 으로 다시 로그인하세요.")
+        # 조용한 실패를 즉시 알린다(Windows 트레이 알림).
+        try:
+            import notify  # noqa: PLC0415
+            msg = {"session_expired": "네이버 세션 만료 — 재로그인 필요",
+                   "images_failed": "이미지 삽입 실패로 발행 중단",
+                   "not_found_after_publish": "발행했으나 글이 확인되지 않음"
+                   }.get(str(reason), f"발행 실패: {reason}")
+            notify.notify(f"SNS Agent 발행 실패 ({nxt.name})", msg)
+        except Exception:
+            pass
 
     # 효과 지표 수집(방문자 매회, 키워드 순위는 하루 1회). 발행 성공/실패와 무관, 실패해도 무시.
     if not dry_run:

@@ -685,7 +685,12 @@ def page_settings(d) -> str:
 <tr><td>하루 발행 수</td><td>{d['max_per_day']}편</td><td class='muted'>.env MAX_POSTS_PER_DAY</td></tr>
 <tr><td>발행 시각</td><td>{times}</td><td class='muted'>작업 스케줄러 SNS-Agent-1/2/3</td></tr>
 </table>
-<p class="muted">강조 포인트는 data/emphasis.json 에 저장됩니다. 비워두면 아무것도 삽입되지 않습니다.</p>"""
+<p class="muted">강조 포인트는 data/emphasis.json 에 저장됩니다. 비워두면 아무것도 삽입되지 않습니다.</p>
+<div class="panel"><div class="ptit">실패 알림 (Windows 트레이)</div>
+<p class="muted" style="margin:0 0 8px">발행이 실패하면(세션 만료·이미지 실패 등) 트레이 풍선 알림이 뜹니다.
+아래 버튼으로 지금 알림이 정상 작동하는지 확인하세요.</p>
+<form method="POST" action="/test-notify"><button type="submit">테스트 알림 보내기</button></form>
+</div>"""
 
 
 _SEG_NAME = {"a": "방송 피켓", "b": "클럽·버킷", "c": "간판"}
@@ -851,6 +856,8 @@ def render(d: dict, shot_base: str = "/shot/", page: str = "/", query: dict | No
             body = "<div class='okbar'>✅ 강조 포인트를 저장했습니다 — 다음 발행 글부터 반영됩니다.</div>" + body
         elif query.get("err"):
             body = "<div class='alert'>저장 실패</div>" + body
+        elif query.get("notify"):
+            body = "<div class='okbar'>🔔 테스트 알림을 보냈습니다 — 트레이(오른쪽 아래)를 확인하세요.</div>" + body
     return layout(page if page in PAGES else "/", body, live, d["stamp"], title=label)
 
 
@@ -916,6 +923,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/save-emphasis":
             self._handle_save_emphasis()
+            return
+        if self.path == "/test-notify":
+            try:
+                import notify
+                notify.notify("SNS Agent 테스트 알림", "알림이 정상 작동합니다. 발행 실패 시 이렇게 표시됩니다.")
+            except Exception:
+                pass
+            self._redirect("/settings?notify=1")
             return
         self.send_error(404)
 
