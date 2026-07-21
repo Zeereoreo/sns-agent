@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+import time
 from datetime import date, datetime
 from itertools import zip_longest
 from pathlib import Path
@@ -40,15 +42,32 @@ STATE = ROOT / "data" / "publish_state.json"
 
 
 def _load_state() -> dict:
-    try:
-        return json.loads(STATE.read_text(encoding="utf-8"))
-    except Exception:
+    """상태 로드. 파일이 '없으면' 새 상태(정상). 파일이 '있는데 못 읽으면' 예외로 중단한다.
+    (예전엔 손상/잠김도 빈 목록으로 처리해서, 다음 실행이 큐 전체를 재발행할 수 있었음.)
+    잠깐의 잠금은 짧게 재시도한다."""
+    if not STATE.exists():
         return {"published": [], "log": []}
+    last = None
+    for _ in range(4):
+        try:
+            data = json.loads(STATE.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or "published" not in data:
+                raise ValueError("형식 오류(published 키 없음)")
+            return data
+        except Exception as e:
+            last = e
+            time.sleep(0.3)
+    raise RuntimeError(
+        f"publish_state.json 을 읽지 못했습니다({last}). 재발행 방지를 위해 중단합니다. "
+        f"파일을 확인/복구하세요: {STATE}")
 
 
 def _save_state(s: dict) -> None:
+    """원자적 저장: 임시파일에 쓰고 os.replace 로 교체(reader 가 반쪽 파일을 보지 않음)."""
     STATE.parent.mkdir(exist_ok=True)
-    STATE.write_text(json.dumps(s, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp = STATE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(s, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, STATE)
 
 
 def _ordered_drafts() -> list[Path]:
@@ -70,7 +89,42 @@ def _image_slots(draft: Path) -> int:
         return 1
 
 
+LOCK = ROOT / "data" / ".publish.lock"
+LOCK_STALE_SEC = 25 * 60   # 이보다 오래된 락은 죽은 프로세스로 간주
+
+
 def run(dry_run: bool = True) -> None:
+    """실제 발행은 락으로 중복 실행을 막는다(같은 초안 이중 발행 방지). dry-run 은 락 없음."""
+    if dry_run:
+        return _run(dry_run=True)
+    LOCK.parent.mkdir(exist_ok=True)
+    if LOCK.exists():
+        try:
+            age = time.time() - LOCK.stat().st_mtime
+        except OSError:
+            age = 0
+        if age < LOCK_STALE_SEC:
+            print(f"\n===== {datetime.now():%Y-%m-%d %H:%M:%S} =====")
+            print("다른 발행이 진행 중(락 존재). 이번 실행은 건너뜁니다.")
+            return
+        print("오래된 락 발견 — 죽은 프로세스로 보고 제거.")
+    try:
+        fd = os.open(str(LOCK), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+    except FileExistsError:
+        print("락 획득 실패(경합) — 건너뜁니다.")
+        return
+    try:
+        _run(dry_run=False)
+    finally:
+        try:
+            LOCK.unlink()
+        except OSError:
+            pass
+
+
+def _run(dry_run: bool = True) -> None:
     # 로그 구분선은 여기서 찍는다(배치 echo 로 찍으면 cp949 라 UTF-8 로그와 섞임).
     print(f"\n===== {datetime.now():%Y-%m-%d %H:%M:%S} =====")
     s = _load_state()
@@ -156,8 +210,13 @@ def run(dry_run: bool = True) -> None:
                 kw, _ = research._kw_from(nx)
                 slug = re.sub(r"[^가-힣a-zA-Z0-9]+", "_", kw)[:40]
             if slug and not (ROOT / "data" / "research" / f"{slug}.json").exists():
-                research.save(research.analyze(nx))
-                print(f"[경쟁분석] 다음 글 '{kw}' 준비 완료")
+                res = research.analyze(nx)
+                # 경쟁글을 하나도 못 얻었으면(스크래핑 실패 가능성) 빈 결과를 캐시하지 않는다.
+                if res.get("competitors") or res.get("length_benchmark"):
+                    research.save(res)
+                    print(f"[경쟁분석] 다음 글 '{kw}' 준비 완료")
+                else:
+                    print(f"[경쟁분석] '{kw}' 결과 없음 — 저장 안 함(다음 실행에서 재시도).")
         except Exception as e:
             print("경쟁 분석 건너뜀:", e)
 

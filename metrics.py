@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from datetime import date
@@ -43,15 +44,19 @@ _NOISE_IDS = {"MyBlog", "PostList", "PostView", "section", "search", "m",
 
 
 def _load(path: Path, default):
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    # 파일이 없으면 default(정상 시작). 있는데 못 읽으면 예외 → 기존 히스토리를
+    # 빈값으로 덮어써 날리는 것을 막는다(수집만 이번에 건너뜀).
+    if not path.exists():
         return default
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _save(path: Path, obj) -> None:
+    """원자적 저장(임시파일 → os.replace)."""
     path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def primary_keyword(draft: Path) -> str:
@@ -91,13 +96,15 @@ def _visitor_counts(page) -> dict:
             "total": int(m.group(2).replace(",", ""))}
 
 
-def _rank_of(page, keyword: str, blog: str) -> int | None:
+def _rank_of(page, keyword: str, blog: str) -> tuple[int | None, int]:
+    """(순위, SERP에서 확인된 블로그 결과 수) 반환.
+    결과 수가 0이면 스크래핑 실패/차단 가능성 → 호출측이 '순위 이탈'로 오기록하지 않는다."""
     url = f"https://search.naver.com/search.naver?ssc=tab.blog.all&query={quote(keyword)}"
     try:
         page.goto(url, timeout=30000)
-        page.wait_for_timeout(1200)
+        page.wait_for_timeout(1500)
     except Exception:
-        return None
+        return None, 0
     order = page.evaluate("""() => {
       const seen=new Set(), out=[];
       for (const a of document.querySelectorAll('a')) {
@@ -111,7 +118,8 @@ def _rank_of(page, keyword: str, blog: str) -> int | None:
       return out;
     }""")
     order = [x for x in order if x not in _NOISE_IDS]
-    return (order.index(blog) + 1) if blog in order else None
+    rank = (order.index(blog) + 1) if blog in order else None
+    return rank, len(order)
 
 
 def collect(force_ranks: bool = False) -> dict:
@@ -119,6 +127,8 @@ def collect(force_ranks: bool = False) -> dict:
     from publish.browser import launch_context  # noqa: PLC0415
 
     blog = config.NAVER_BLOG_ID or "made-us"
+    if not config.NAVER_BLOG_ID:
+        print(f"[경고] NAVER_BLOG_ID 미설정 — '{blog}' 로 가정. .env 확인(테스트=made-us2).")
     today = str(date.today())
     data = _load(METRICS, {"visitors": {}, "ranks": {}, "keywords": {}})
     kw_map = published_keywords()
@@ -136,12 +146,22 @@ def collect(force_ranks: bool = False) -> dict:
             print(f"[방문자] 오늘 {vc['today']} / 전체 {vc['total']}")
 
         if need_ranks and kw_map:
-            ranks = {}
+            ranks, failures = {}, 0
             for name, kw in kw_map.items():
-                r = _rank_of(page, kw, blog)
+                r, n_results = _rank_of(page, kw, blog)
+                if r is None and n_results == 0:
+                    # SERP가 비어있음 = 스크래핑 실패/차단. '이탈'로 기록하지 않고 건너뜀.
+                    failures += 1
+                    print(f"[순위] '{kw}' -> 수집 실패(SERP 비어있음), 기록 안 함")
+                    continue
                 ranks[kw] = r
                 print(f"[순위] '{kw}' -> {r if r else '30위권 밖'}")
-            data.setdefault("ranks", {})[today] = ranks
+            # 하나라도 실제로 수집됐을 때만 기록. 전부 실패면 그날 순위를 안 써서
+            # 가짜 '전면 이탈'을 막는다(다음 실행에서 재시도).
+            if ranks:
+                data.setdefault("ranks", {})[today] = ranks
+            else:
+                print(f"[순위] 전건 수집 실패({failures}) — 오늘 순위 기록 보류.")
         elif not need_ranks:
             print("[순위] 오늘 이미 수집됨(건너뜀). 강제: --ranks")
 

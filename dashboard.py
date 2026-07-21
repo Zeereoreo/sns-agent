@@ -157,6 +157,8 @@ def _metrics_view() -> dict:
     for d in days:
         total = vis[d].get("total")
         new = (total - prev_total) if (prev_total is not None and total is not None) else None
+        if new is not None and new < 0:
+            new = None      # 누적이 줄면 오파싱 → 가짜 음수 막대 대신 공백
         series.append({"date": d, "total": total, "today": vis[d].get("today"), "new": new})
         prev_total = total
 

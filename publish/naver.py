@@ -122,23 +122,51 @@ def login():
 
 
 # ── 게시 ────────────────────────────────────────────────────────
-def _verify_published(page, blog_id: str, title: str) -> str | None:
-    """블로그 목록에서 방금 쓴 제목을 찾아 '진짜 올라갔는지' 확인하고 URL을 돌려준다.
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", "", s or "")
 
-    발행 버튼 클릭 성공 != 게시 성공. 클릭만 믿으면 세션 만료·검증 실패 때
-    올라가지도 않은 글을 발행됨으로 기록하게 된다.
+
+def _verify_published(page, blog_id: str, title: str) -> str | None:
+    """방금 쓴 글이 '진짜' 블로그에 올라갔는지 확인하고 URL을 돌려준다.
+
+    발행 버튼 클릭 성공 != 게시 성공. 홈 화면 본문 substring 매칭은 렌더 지연(오탐→중복발행)과
+    제목 앞부분 충돌(오검증)에 취약하므로, 게시글 목록 API로 최신 글 제목을 정확히 대조한다.
+    최대 4회 재시도(게시 반영에 몇 초 걸릴 수 있음).
     """
-    key = re.sub(r"\s+", " ", title).strip()[:15]
-    if not key:
+    want = _norm(title)
+    if not want:
         return None
+    home = f"https://m.blog.naver.com/{blog_id}"
+    api = (f"https://m.blog.naver.com/api/blogs/{blog_id}/post-list"
+           f"?categoryNo=0&itemCount=10&page=1&userId={blog_id}")
+    try:                       # 컨텍스트/쿠키 확보(이게 없으면 API 403)
+        page.goto(home, timeout=20000)
+        page.wait_for_timeout(1500)
+    except Exception:
+        pass
+    for attempt in range(4):
+        try:
+            r = page.request.get(api, headers={"referer": home}, timeout=15000)
+            items = (r.json() or {}).get("result", {}).get("items", []) if r.ok else []
+            for it in items:
+                t = _norm(it.get("titleWithInspectMessage") or it.get("title") or "")
+                # 정규화 제목이 서로 충분히 겹치면 동일 글로 본다(부분 잘림 대비 양방향 포함).
+                if t and (t == want or want in t or t in want):
+                    no = it.get("logNo")
+                    return f"https://m.blog.naver.com/{blog_id}/{no}" if no else \
+                        f"https://m.blog.naver.com/{blog_id}"
+        except Exception as e:
+            print(f"  발행 확인 API 오류(시도 {attempt + 1}):", e)
+        page.wait_for_timeout(2500)
+
+    # 폴백: 홈 화면 본문 대조(API 실패 시)
     try:
         page.goto(f"https://m.blog.naver.com/{blog_id}", timeout=20000)
         page.wait_for_timeout(2500)
-        body = re.sub(r"\s+", " ", page.inner_text("body"))
-        if key in body:
+        if want[:20] and want[:20] in _norm(page.inner_text("body")):
             return page.url
     except Exception as e:
-        print("  발행 확인 중 오류:", e)
+        print("  발행 확인 폴백 오류:", e)
     return None
 
 
@@ -214,12 +242,11 @@ def publish(draft_path: str, image_dir: str | None = None,
                     # images 는 image_paths/image_dir 어느 쪽으로 받았든 채워져 있다.
                     # (예전엔 image_dir 을 조건으로 봐서 스케줄러 경로의 이미지가 통째로 누락됐음)
                     if img_i < len(images):
-                        _insert_image(page, images[img_i])
+                        ok_img = _insert_image(page, images[img_i])
                         img_i += 1
-                        # SEO: 네이버는 붙여넣기 이미지에 ALT 를 안 붙인다. 초안의 ALT 문구를
-                        # 사진 아래 캡션 문단으로 타이핑 → 색인되는 본문 텍스트 + 키워드 노출.
+                        # 캡션은 이미지가 실제로 삽입됐을 때만. (실패 시 고아 '▲ 캡션' 방지)
                         cap = (blk.get("alt") or "").strip()
-                        if cap:
+                        if ok_img and cap:
                             page.keyboard.type(f"▲ {cap}", delay=random.randint(15, 40))
                             page.keyboard.press("Enter")
                             _pause(0.2, 0.5)
@@ -250,6 +277,13 @@ def publish(draft_path: str, image_dir: str | None = None,
         except Exception:
             inserted = -1
         result["images_inserted"] = max(inserted, 0)
+        if images and inserted == 0 and not dry_run:
+            # 이미지가 계획됐는데 한 장도 안 들어감 = 반쪽 글. 발행하지 말고 중단(큐에 남겨 재시도).
+            print(f"  ⚠ 이미지 {len(images)}장 계획했으나 0장 삽입 — 발행 중단(재시도).")
+            _shot(page, "03_body_NOIMG")
+            ctx.close()
+            result["reason"] = "images_failed"
+            return result
         if images and inserted == 0:
             print(f"  ⚠ 이미지 {len(images)}장을 넣으려 했으나 본문에 0장 — 삽입 실패")
         elif inserted >= 0 and inserted < len(images):
@@ -262,13 +296,18 @@ def publish(draft_path: str, image_dir: str | None = None,
             page.locator(SEL["publish_open"]).first.click(timeout=5000)
             _pause()
             _shot(page, "04_publish_panel")
+            tag_ok = 0
             for tag in data["tags"]:
                 try:
                     page.locator(SEL["tag_input"]).first.fill(tag)
                     page.keyboard.press("Enter")
                     _pause(0.1, 0.3)
+                    tag_ok += 1
                 except Exception:
-                    break
+                    continue   # 한 태그 실패로 나머지를 버리지 않는다
+            result["tags_added"] = tag_ok
+            if data["tags"] and tag_ok < len(data["tags"]):
+                print(f"  ⚠ 태그 {len(data['tags'])}개 중 {tag_ok}개만 입력됨")
             _shot(page, "05_tags")
         except Exception as e:
             print("발행 패널/태그 실패(선택자 보정 필요):", e)
@@ -324,11 +363,15 @@ def publish(draft_path: str, image_dir: str | None = None,
         return result
 
 
-def _insert_image(page, img_path: Path):
-    """클립보드 붙여넣기로 이미지 삽입 (파일선택창 우회 — 네이버에서 유일하게 안정적).
+def _insert_image(page, img_path: Path) -> bool:
+    """클립보드 붙여넣기로 이미지 삽입. 실제로 컴포넌트가 늘었는지 확인해 성공/실패를 반환한다.
 
     커서는 본문 입력 흐름상 이미 본문에 있으므로 재클릭하지 않고 현재 위치에 붙여넣는다.
     """
+    try:
+        before = page.locator(".se-component.se-image").count()
+    except Exception:
+        before = 0
     try:
         b64 = base64.b64encode(img_path.read_bytes()).decode()
         mime = "image/jpeg" if img_path.suffix.lower() in (".jpg", ".jpeg") else "image/png"
@@ -349,8 +392,14 @@ def _insert_image(page, img_path: Path):
             }""", [b64, mime])
         page.keyboard.press("Control+V")
         page.wait_for_timeout(random.randint(1800, 2800))  # 업로드·삽입 대기
+        after = page.locator(".se-component.se-image").count()
+        if after <= before:
+            print(f"  이미지 삽입 확인 실패({img_path.name}): 컴포넌트 증가 없음")
+            return False
+        return True
     except Exception as e:
         print(f"  이미지 삽입 실패({img_path.name}):", e)
+        return False
 
 
 def main():
