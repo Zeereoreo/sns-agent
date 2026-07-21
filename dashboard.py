@@ -734,6 +734,8 @@ def page_growth(d) -> str:
         q = growth.rank_queue()
         nxt = growth.next_draft()
         tlog = growth._load(growth.GLOG, {"tune": []}).get("tune", [])
+        vt = growth.visitor_trend()
+        rv = growth.rank_visitor_signal()
     except Exception as ex:
         return f"<h2>성장 엔진</h2><p class='alert'>엔진 로드 실패: {e(str(ex))}</p>"
 
@@ -766,6 +768,16 @@ def page_growth(d) -> str:
         "<b>이길 수 있는 주제에 힘을 몰아주는</b> 최적화입니다.</div>"
         + "<h2>세그먼트 성과 (관측, 1=최고)</h2>"
         + f"<div class='cards'>{seg_cards}</div>"
+        + "<div class='panel'><div class='ptit'>방문자 연결 — 이 최적화가 실제 방문자로 이어지나</div>"
+        + f"<div>방문자 추세: <b>{e(vt['label'])}</b>"
+        + (f" (최근 +{vt['recent_new_per_day']}/일 · 누적 {vt['latest_total']})"
+           if vt.get('recent_new_per_day') is not None
+           else f" (누적 {vt.get('latest_total')})") + "</div>"
+        + f"<div style='margin-top:4px'>순위→방문자 상관: <b>"
+        + (f"{rv['corr']}" if rv.get('corr') is not None else e(str(rv.get('note')))) + "</b></div>"
+        + "<div class='muted' style='margin-top:6px'>정직: 네이버가 검색어별 유입을 API로 주지 않아 "
+        + "'전체 방문자 추이'와 '1페이지 노출 수'의 관계로 평가합니다. 데이터가 쌓이면 상관이 계산됩니다. "
+        + "여러 날 순위는 좋은데 방문자가 하락하면 엔진이 탐색·폭 가중치를 자동으로 올립니다.</div></div>"
         + f"<div class='panel'><div class='ptit'>현재 가중치 (자가 튜닝됨)</div><div>{wrow}</div>"
         + f"<div class='muted' style='margin-top:6px'>다음 추천 발행: <b>{e(str(nxt))}</b> "
         + "(⭐ 표시). 세그먼트 3연속은 자동 회피.</div></div>"

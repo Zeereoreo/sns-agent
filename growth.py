@@ -127,6 +127,47 @@ def segment_scores() -> dict:
     return out
 
 
+# ---------- 방문자 연결(정직: 검색어별 귀속은 네이버가 API로 안 줌 → 전체 추이·상관만) ----------
+
+def visitor_trend() -> dict:
+    """전체 방문자 시계열의 최근 추세. {days, latest_total, recent_new_per_day, label}."""
+    vis = _load(METRICS, {}).get("visitors", {})
+    days = sorted(vis)
+    totals = [vis[d].get("total") for d in days if isinstance(vis[d].get("total"), int)]
+    out = {"days": len(totals), "latest_total": totals[-1] if totals else None,
+           "recent_new_per_day": None, "label": "데이터 축적 중"}
+    if len(totals) >= 3:
+        span = min(7, len(totals) - 1)
+        new = (totals[-1] - totals[-1 - span]) / span
+        out["recent_new_per_day"] = round(new, 1)
+        out["label"] = "상승" if new > 0.5 else ("하락" if new < -0.5 else "보합")
+    return out
+
+
+def rank_visitor_signal() -> dict:
+    """'1페이지 노출 키워드 수'와 '방문자 수'가 함께 움직이는지(피어슨 상관).
+    순위 최적화가 실제 방문자로 이어지는지 평가하는 지표. 데이터 3일+ 필요."""
+    m = _load(METRICS, {})
+    ranks, vis = m.get("ranks", {}), m.get("visitors", {})
+    xs, ys = [], []
+    for d in sorted(set(ranks) & set(vis)):
+        p1 = sum(1 for r in ranks[d].values() if isinstance(r, int) and r <= 10)
+        t = vis[d].get("total")
+        if isinstance(t, int):
+            xs.append(p1)
+            ys.append(t)
+    if len(xs) < 3:
+        return {"points": len(xs), "corr": None, "note": "데이터 축적 중(3일+ 필요)"}
+    n = len(xs)
+    mx, my = sum(xs) / n, sum(ys) / n
+    cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    vx = sum((x - mx) ** 2 for x in xs) ** 0.5
+    vy = sum((y - my) ** 2 for y in ys) ** 0.5
+    corr = (cov / (vx * vy)) if vx and vy else None
+    return {"points": n, "corr": round(corr, 2) if corr is not None else None,
+            "note": "1페이지 노출↑ 이 방문자↑ 로 이어지는 정도"}
+
+
 # ---------- 초안 점수화 ----------
 
 def _seo_score(path: Path) -> float:
@@ -231,10 +272,20 @@ def evaluate_and_tune(apply: bool = True) -> dict:
         top = max(signals, key=signals.get)
         adjust[top] += (0.02 if good else -0.02)
 
+    # 방문자 반영(정직·보수적): 순위는 좋은데 방문자가 여러 날 '하락'이면
+    # exploit(세그먼트)만으론 안 되는 것 → 탐색/폭을 조금 올려 다른 주제를 시도.
+    # 데이터 5일+ 있고 뚜렷한 하락일 때만 작동(노이즈 방지).
+    vt = visitor_trend()
+    if vt["days"] >= 5 and vt["label"] == "하락":
+        adjust["explore"] += 0.02
+        adjust["diversity"] += 0.02
+        adjust["seg"] -= 0.02
+
     new = {k: max(0.05, w[k] + adjust[k]) for k in DEFAULT_WEIGHTS}
     s = sum(new.values())
     new = {k: round(new[k] / s, 4) for k in new}
-    result = {"samples": samples, "old": w, "new": new, "adjust": adjust}
+    result = {"samples": samples, "old": w, "new": new, "adjust": adjust,
+              "visitor_trend": vt["label"]}
     if apply and samples > 0:
         _save(WEIGHTS_FILE, new)
         log = _load(GLOG, {"tune": []})
@@ -250,8 +301,14 @@ def report() -> str:
     segs = segment_scores()
     w = load_weights()
     q = rank_queue()
+    vt = visitor_trend()
+    rv = rank_visitor_signal()
     lines = ["===== 방문자 성장 엔진 리포트 =====",
              f"세그먼트 성과(관측): a={segs['a']:.2f} b={segs['b']:.2f} c={segs['c']:.2f} (1=최고)",
+             f"방문자 추세: {vt['label']}"
+             + (f" (최근 +{vt['recent_new_per_day']}/일, 누적 {vt['latest_total']})"
+                if vt['recent_new_per_day'] is not None else f" (누적 {vt['latest_total']})"),
+             f"순위→방문자 상관: {rv['corr'] if rv['corr'] is not None else rv['note']}",
              f"현재 가중치: " + " ".join(f"{k}={w[k]:.2f}" for k in DEFAULT_WEIGHTS),
              f"다음 추천 발행: {next_draft()}",
              "우선순위 상위 5:"]
