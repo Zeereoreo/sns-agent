@@ -216,6 +216,13 @@ def publish(draft_path: str, image_dir: str | None = None,
                     if img_i < len(images):
                         _insert_image(page, images[img_i])
                         img_i += 1
+                        # SEO: 네이버는 붙여넣기 이미지에 ALT 를 안 붙인다. 초안의 ALT 문구를
+                        # 사진 아래 캡션 문단으로 타이핑 → 색인되는 본문 텍스트 + 키워드 노출.
+                        cap = (blk.get("alt") or "").strip()
+                        if cap:
+                            page.keyboard.type(f"▲ {cap}", delay=random.randint(15, 40))
+                            page.keyboard.press("Enter")
+                            _pause(0.2, 0.5)
                     continue
                 page.keyboard.type(blk["text"], delay=random.randint(15, 45))
                 page.keyboard.press("Enter")
