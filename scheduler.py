@@ -136,7 +136,18 @@ def _run(dry_run: bool = True) -> None:
         print(f"오늘 발행 상한({config.MAX_POSTS_PER_DAY}) 도달. 종료.")
         return
 
-    nxt = next((p for p in _ordered_drafts() if p.name not in published), None)
+    # 발행 순서 = 성장 엔진이 성과 데이터로 정한 우선순위. 실패 시 기존 인터리브로 폴백.
+    nxt = None
+    try:
+        import growth  # noqa: PLC0415
+        pick = growth.next_draft()
+        if pick and (DRAFTS / pick).exists() and pick not in published:
+            nxt = DRAFTS / pick
+            print(f"[성장엔진] 다음 발행 선택: {pick}")
+    except Exception as e:
+        print("성장엔진 건너뜀(인터리브로 폴백):", e)
+    if nxt is None:
+        nxt = next((p for p in _ordered_drafts() if p.name not in published), None)
     if nxt is None:
         print("발행할 초안 없음(큐가 비었습니다).")
         return
@@ -210,6 +221,15 @@ def _run(dry_run: bool = True) -> None:
             metrics.collect()
         except Exception as e:
             print("지표 수집 건너뜀:", e)
+
+        # 성장 엔진 자가 튜닝: 최신 순위로 과거 결정을 평가해 가중치 보정.
+        try:
+            import growth  # noqa: PLC0415
+            r = growth.evaluate_and_tune()
+            if r["samples"]:
+                print(f"[성장엔진] 자가 튜닝(샘플 {r['samples']}) → {r['new']}")
+        except Exception as e:
+            print("성장엔진 튜닝 건너뜀:", e)
 
         # 다음 발행 예정글의 경쟁 분석을 미리 준비(없을 때만). 실패해도 무시.
         try:

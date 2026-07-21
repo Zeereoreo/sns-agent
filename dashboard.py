@@ -424,9 +424,9 @@ def _rank_badge(rank, delta) -> str:
     return f"<span class='badge {cls}'>{rank}위</span>{arrow}"
 
 
-NAV = [("/", "개요"), ("/analytics", "성과"), ("/posts", "발행"), ("/calendar", "캘린더"),
-       ("/seo", "콘텐츠·SEO"), ("/images", "이미지"), ("/settings", "설정"),
-       ("/diag", "진단"), ("/ops", "상태")]
+NAV = [("/", "개요"), ("/analytics", "성과"), ("/growth", "성장엔진"), ("/posts", "발행"),
+       ("/calendar", "캘린더"), ("/seo", "콘텐츠·SEO"), ("/images", "이미지"),
+       ("/settings", "설정"), ("/diag", "진단"), ("/ops", "상태")]
 
 
 def _log_tail(n: int = 40) -> str:
@@ -723,6 +723,58 @@ def _refresh_metrics_bg():
     finally:
         _refresh["running"] = False
         _cache["data"] = None
+
+
+def page_growth(d) -> str:
+    e = html.escape
+    try:
+        import growth
+        segs = growth.segment_scores()
+        w = growth.load_weights()
+        q = growth.rank_queue()
+        nxt = growth.next_draft()
+        tlog = growth._load(growth.GLOG, {"tune": []}).get("tune", [])
+    except Exception as ex:
+        return f"<h2>성장 엔진</h2><p class='alert'>엔진 로드 실패: {e(str(ex))}</p>"
+
+    seg_name = {"a": "방송 피켓", "b": "클럽·버킷", "c": "간판"}
+    seg_cards = "".join(
+        f"<div class='card'><div class='k'>{seg_name[s]} 성과</div>"
+        f"<div class='v'>{segs[s]:.2f}</div></div>" for s in "abc")
+    wrow = " · ".join(f"{k} {w[k]:.2f}" for k in growth.DEFAULT_WEIGHTS)
+
+    qrows = ""
+    for r in q[:15]:
+        b = r["breakdown"]
+        star = " ⭐" if r["name"] == nxt else ""
+        qrows += (f"<tr><td>{r['score']:.3f}{star}</td><td>[{r['seg']}]</td>"
+                  f"<td><a href='/post?file={e(r['name'])}'>{e(r['name'])}</a></td>"
+                  f"<td class='muted'>{e(r['keyword'])}</td>"
+                  f"<td class='muted'>세그{b['seg']} · SEO{b['seo']} · 탐색{b['explore']} · 폭{b['diversity']}</td></tr>")
+    tune_html = ""
+    if tlog:
+        rows = "".join(
+            f"<tr><td>{e(str(t.get('date','')))}</td><td>{t.get('samples','')}</td>"
+            f"<td class='muted'>" + " · ".join(f"{k} {v}" for k, v in t.get('weights', {}).items())
+            + "</td></tr>" for t in tlog[-8:])
+        tune_html = ("<h2>자가 튜닝 이력</h2><table><tr><th>날짜</th><th>샘플</th>"
+                     f"<th>보정된 가중치</th></tr>{rows}</table>")
+
+    return (
+        "<div class='dlbar'>이 엔진은 키워드 순위·방문자 데이터로 <b>어떤 글을 먼저 발행할지</b>를 "
+        "정하고, 결과를 보고 스스로 가중치를 보정합니다. 없는 방문자를 만드는 게 아니라 "
+        "<b>이길 수 있는 주제에 힘을 몰아주는</b> 최적화입니다.</div>"
+        + "<h2>세그먼트 성과 (관측, 1=최고)</h2>"
+        + f"<div class='cards'>{seg_cards}</div>"
+        + f"<div class='panel'><div class='ptit'>현재 가중치 (자가 튜닝됨)</div><div>{wrow}</div>"
+        + f"<div class='muted' style='margin-top:6px'>다음 추천 발행: <b>{e(str(nxt))}</b> "
+        + "(⭐ 표시). 세그먼트 3연속은 자동 회피.</div></div>"
+        + "<h2>발행 우선순위 (성장 점수순)</h2>"
+        + "<div class=scroll><table><tr><th>점수</th><th>세그</th><th>초안</th>"
+        + f"<th>키워드</th><th>점수 근거</th></tr>{qrows}</table></div>"
+        + tune_html
+        + "<p class='muted'>데이터가 쌓일수록 세그먼트 성과가 갈리고, 엔진이 잘 되는 주제를 "
+        + "우선합니다. 지금은 발행글이 적어 SEO·폭 위주로 정렬됩니다.</p>")
 
 
 def page_analytics(d) -> str:
@@ -1068,6 +1120,7 @@ def page_post_detail(d, fname: str) -> str:
 PAGES = {
     "/": ("개요", page_overview),
     "/analytics": ("성과", page_analytics),
+    "/growth": ("성장엔진", page_growth),
     "/posts": ("발행", page_posts),
     "/calendar": ("캘린더", page_calendar),
     "/seo": ("콘텐츠·SEO", page_seo),
