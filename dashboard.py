@@ -9,7 +9,9 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import html
+import io
 import json
 import re
 import socket
@@ -354,6 +356,8 @@ tr:hover td{background:#151920}
 .panel button{background:#1d3a5f;color:#cfe4ff;border:1px solid #2a4d78;border-radius:7px;padding:7px 18px;font:inherit;font-size:13px;cursor:pointer;margin-right:10px}
 .panel button:hover{background:#264a75}
 .emph{background:#141a14;border:1px solid #2a4d2f;border-radius:8px;padding:10px 12px;margin:10px 0;color:#8fd6a0;font-size:13px}
+.dlbar{background:#171a21;border:1px solid #232833;border-radius:8px;padding:10px 14px;margin:0 0 8px;font-size:13px}
+.dl{font-size:12px;font-weight:400;margin-left:8px}
 """
 
 STATUS_BADGE = {"done": ("발행됨", "ok"), "next": ("다음 차례", "next"), "wait": ("대기", "mut")}
@@ -430,6 +434,43 @@ def _log_tail(n: int = 40) -> str:
     except Exception:
         return "(로그 없음)"
     return "\n".join(lines[-n:])
+
+
+def _csv_history() -> bytes:
+    """발행 이력 CSV. 엑셀 한글 깨짐 방지 위해 UTF-8 BOM."""
+    state = scheduler._load_state()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["날짜", "시각", "초안", "모드", "이미지", "SEO점수", "결과", "사유", "URL"])
+    for x in state.get("log", []):
+        w.writerow([x.get("date", ""), x.get("time", ""), x.get("draft", ""),
+                    "dry-run" if x.get("dry") else "실제", x.get("images", ""),
+                    x.get("seo_score", ""), "성공" if x.get("ok") else "미발행",
+                    x.get("reason", "") or "", x.get("url", "") or ""])
+    return b"\xef\xbb\xbf" + buf.getvalue().encode("utf-8")
+
+
+def _csv_metrics() -> bytes:
+    """방문자 + 키워드 순위 시계열 CSV."""
+    m = _load_json(ROOT / "data" / "metrics.json", {})
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    # 방문자
+    w.writerow(["[방문자]"])
+    w.writerow(["날짜", "오늘", "전체"])
+    for d in sorted(m.get("visitors", {})):
+        v = m["visitors"][d]
+        w.writerow([d, v.get("today", ""), v.get("total", "")])
+    w.writerow([])
+    # 키워드 순위(날짜 x 키워드)
+    ranks = m.get("ranks", {})
+    kws = sorted({k for day in ranks.values() for k in day})
+    if kws:
+        w.writerow(["[키워드 순위]"])
+        w.writerow(["날짜"] + kws)
+        for d in sorted(ranks):
+            w.writerow([d] + [ranks[d].get(k, "") for k in kws])
+    return b"\xef\xbb\xbf" + buf.getvalue().encode("utf-8")
 
 
 def _load_research() -> dict:
@@ -613,12 +654,17 @@ def page_overview(d) -> str:
 
 
 def page_analytics(d) -> str:
-    return _kpi_cards(d) + _metrics_section(d)
+    dl = ("<div class='dlbar'>클라이언트 보고용 내보내기: "
+          "<a href='/export/metrics.csv'>방문자·순위 CSV</a> · "
+          "<a href='/export/history.csv'>발행 이력 CSV</a> "
+          "<span class='muted'>(엑셀에서 바로 열림)</span></div>")
+    return _kpi_cards(d) + dl + _metrics_section(d)
 
 
 def page_posts(d) -> str:
     return (f"<h2>발행 큐 ({d['done']}/{d['total']})</h2>" + _queue_table(d)
-            + "<h2>최근 발행 기록</h2>" + _log_table(d))
+            + "<h2>최근 발행 기록 "
+            + "<a class='dl' href='/export/history.csv'>⬇ CSV</a></h2>" + _log_table(d))
 
 
 def page_seo(d) -> str:
@@ -934,6 +980,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
+        if path in ("/export/history.csv", "/export/metrics.csv"):
+            data = _csv_history() if "history" in path else _csv_metrics()
+            fname = "publish_history.csv" if "history" in path else "metrics.csv"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if path == "/api":
             self._send(json.dumps(cached_collect(), ensure_ascii=False).encode(),
                        "application/json; charset=utf-8")
