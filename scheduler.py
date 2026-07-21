@@ -259,8 +259,16 @@ def status() -> None:
     print(f"전체 초안: {len(alld)}  |  발행됨: {len(pub)}  |  남음: {len(alld) - len(pub)}")
     today = str(date.today())
     print(f"오늘 발행: {sum(1 for e in s['log'] if e.get('date') == today and e.get('ok'))} / {config.MAX_POSTS_PER_DAY}")
-    nxt = next((p.name for p in alld if p.name not in pub), None)
-    print(f"다음 대상: {nxt}")
+    # 다음 대상 = 실제 발행에 쓰는 성장엔진 선택(폴백: 인터리브)
+    nxt = None
+    try:
+        import growth  # noqa: PLC0415
+        nxt = growth.next_draft()
+    except Exception:
+        pass
+    if not nxt:
+        nxt = next((p.name for p in alld if p.name not in pub), None)
+    print(f"다음 대상: {nxt}  (성장엔진 우선순위)")
 
 
 def main() -> None:
