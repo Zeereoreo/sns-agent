@@ -19,6 +19,7 @@ import webbrowser
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
@@ -303,6 +304,15 @@ tr:hover td{background:#151920}
 #quit{background:#232833;color:#c9d1dc;border:1px solid #333b49;border-radius:8px;
  padding:7px 14px;font:inherit;font-size:12.5px;cursor:pointer}
 #quit:hover{background:#3a1618;color:#ff8087;border-color:#5b2327}
+.nav{display:flex;gap:2px;flex-wrap:wrap;margin:0 0 22px;border-bottom:1px solid #232833}
+.nav a{padding:9px 15px;color:#8b93a1;text-decoration:none;font-size:13.5px;border-bottom:2px solid transparent;margin-bottom:-1px}
+.nav a.on{color:#e6e8eb;border-bottom-color:#4a7dff;font-weight:600}
+.nav a:hover{color:#e6e8eb}
+.logbox{background:#0b0d11;border:1px solid #232833;border-radius:8px;padding:12px;font-size:12px;color:#9aa4b2;overflow-x:auto;white-space:pre-wrap;max-height:360px}
+.preview{background:#171a21;border:1px solid #232833;border-radius:10px;padding:16px 20px}
+.preview h4{margin:16px 0 6px;font-size:14px;color:#e6e8eb}
+.preview p{margin:6px 0;color:#c4ccd6}
+.imgslot{margin:10px 0;padding:10px 12px;border:1px dashed #333b49;border-radius:8px;color:#8b93a1;font-size:12.5px}
 """
 
 STATUS_BADGE = {"done": ("발행됨", "ok"), "next": ("다음 차례", "next"), "wait": ("대기", "mut")}
@@ -368,8 +378,36 @@ def _rank_badge(rank, delta) -> str:
     return f"<span class='badge {cls}'>{rank}위</span>{arrow}"
 
 
-def render(d: dict, shot_base: str = "/shot/") -> str:
-    """shot_base: 서버 모드는 '/shot/', 스냅샷 파일 모드는 상대경로."""
+NAV = [("/", "개요"), ("/analytics", "성과"), ("/posts", "발행"),
+       ("/seo", "콘텐츠·SEO"), ("/ops", "상태")]
+
+
+def _log_tail(n: int = 40) -> str:
+    f = ROOT / "data" / "scheduler.log"
+    try:
+        lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return "(로그 없음)"
+    return "\n".join(lines[-n:])
+
+
+def _load_research() -> dict:
+    """data/research/*.json → {키워드: 분석}."""
+    out = {}
+    d = ROOT / "data" / "research"
+    if d.exists():
+        for f in d.glob("*.json"):
+            try:
+                r = json.loads(f.read_text(encoding="utf-8"))
+                out[r.get("keyword", f.stem)] = r
+            except Exception:
+                pass
+    return out
+
+
+# ---------- 공통 HTML 조각 ----------
+
+def _alerts_html(d) -> str:
     e = html.escape
     alerts = []
     blocked = [t["name"] for t in d["tasks"] if t.get("battery_block")]
@@ -396,28 +434,54 @@ def render(d: dict, shot_base: str = "/shot/") -> str:
     for w in d.get("weak_drafts", []):
         alerts.append(f"SEO 점수 낮은 대기글: <b>{e(w['file'])}</b> ({w['grade']} {w['score']}점) — "
                       "발행 전 제목·본문·키워드 보강 권장")
-    alert_html = "".join(f'<div class="alert">{a}</div>' for a in alerts)
+    return "".join(f'<div class="alert">{a}</div>' for a in alerts)
 
-    cards = f"""
+
+def _kpi_cards(d) -> str:
+    e = html.escape
+    m = d.get("metrics", {})
+    cum = m.get("cum_total")
+    return f"""
     <div class="cards">
       <div class="card"><div class="k">오늘 발행</div><div class="v">{d['today_ok']} <small>/ {d['max_per_day']}</small></div></div>
       <div class="card"><div class="k">발행 완료</div><div class="v">{d['done']} <small>/ {d['total']}편</small></div></div>
       <div class="card"><div class="k">남은 초안</div><div class="v">{d['total'] - d['done']} <small>편 · 약 {d['days_left']}일치</small></div></div>
+      <div class="card"><div class="k">누적 방문자</div><div class="v">{cum if cum is not None else '-'}</div></div>
+      <div class="card"><div class="k">1페이지 노출</div><div class="v">{m.get('kw_on_page1', 0)} <small>/ {m.get('kw_tracked', 0)}개</small></div></div>
       <div class="card"><div class="k">대상 블로그</div><div class="v" style="font-size:16px">{e(d['blog'])}</div></div>
-      <div class="card"><div class="k">이미지</div><div class="v" style="font-size:15px">인포 {d['images']['info']} · 인박스 {d['images']['inbox']} · 풀 {d['images']['pool']}</div></div>
     </div>"""
 
+
+def _tasks_table(d) -> str:
+    e = html.escape
     trows = "".join(
         f"<tr><td>{e(t['name'])}</td><td>{e(t['next'])}</td><td>{e(t['last'])}</td>"
         f"<td><span class='badge {t['level']}'>{e(t['result'])}</span></td></tr>"
         for t in d["tasks"])
+    return ("<table><tr><th>작업</th><th>다음 실행</th><th>마지막 실행</th>"
+            f"<th>마지막 결과</th></tr>{trows}</table>")
 
+
+def _queue_table(d, link=True) -> str:
+    e = html.escape
     qrows = ""
     for q in d["queue"]:
         label, cls = STATUS_BADGE[q["status"]]
+        seo = q.get("seo")
+        sb = ""
+        if seo:
+            gc = {"A": "ok", "B": "next", "C": "warn", "D": "bad"}.get(seo["grade"], "mut")
+            sb = f"<span class='badge {gc}'>{seo['grade']} {seo['score']}</span>"
+        name = (f"<a href='/post?file={e(q['name'])}'>{e(q['name'])}</a>" if link
+                else e(q["name"]))
         qrows += (f"<tr><td>{q['i']}</td><td><span class='badge {cls}'>{label}</span></td>"
-                  f"<td>{e(q['name'])}</td><td>{e(q['title'])}</td></tr>")
+                  f"<td>{name}</td><td>{e(q['title'])}</td><td>{sb}</td></tr>")
+    return ("<div class=scroll><table><tr><th>#</th><th>상태</th><th>파일</th>"
+            f"<th>제목</th><th>SEO</th></tr>{qrows}</table></div>")
 
+
+def _log_table(d) -> str:
+    e = html.escape
     lrows = ""
     for x in d["log"]:
         rtext, rcls = _reason(x.get("reason"))
@@ -441,88 +505,215 @@ def render(d: dict, shot_base: str = "/shot/") -> str:
                   + (f" <span class='badge {rcls}'>{e(rtext)}</span>" if rtext else "")
                   + "</td></tr>")
     lrows = lrows or "<tr><td colspan=6>기록 없음</td></tr>"
+    return ("<table><tr><th>날짜</th><th>초안</th><th>모드</th><th>이미지</th>"
+            f"<th>SEO</th><th>결과</th></tr>{lrows}</table>")
 
-    shots = "".join(
+
+def _shots_html(d, shot_base) -> str:
+    e = html.escape
+    return "".join(
         f'<figure><img src="{shot_base}{e(s)}" alt="{e(s)}"><figcaption>{e(s)}</figcaption></figure>'
-        for s in d["shots"]) or "<p style='color:#8b93a1'>스크린샷 없음</p>"
+        for s in d["shots"]) or "<p class='muted'>스크린샷 없음</p>"
 
-    # --- 효과 측정 섹션 (방문자 추이 + 키워드 순위) ---
+
+def _next_seo_panel(d) -> str:
+    e = html.escape
+    ns = d.get("next_seo")
+    if not ns:
+        return ""
+    gcls = {"A": "ok", "B": "next", "C": "warn", "D": "bad"}.get(ns["grade"], "mut")
+    weak = ("<div class='muted' style='margin-top:6px'>보강 포인트: "
+            + ", ".join(_SEO_LABEL.get(w, w) for w in ns["weak"]) + "</div>") if ns.get("weak") else \
+           "<div class='muted' style='margin-top:6px'>모든 항목 통과</div>"
+    ci = ns.get("competitor")
+    comp_html = ""
+    if ci:
+        lg = ci.get("length_gap")
+        lentxt = ""
+        if ci.get("length_benchmark"):
+            lentxt = (f"경쟁 글 길이 중앙값 {ci['length_benchmark']}자"
+                      + (f" · 우리가 {abs(lg)}자 {'짧음 → 보강 권장' if lg and lg > 0 else '김'}"
+                         if lg else ""))
+        miss = (" · 보강 후보: " + ", ".join(ci["missing_terms"])) if ci.get("missing_terms") else ""
+        comp_html = f"<div class='muted' style='margin-top:6px'>경쟁 분석: {e(lentxt)}{e(miss)}</div>"
+    return (f"<div class='panel'><div class='ptit'>다음 발행글 SEO 점검</div>"
+            f"<div><span class='badge {gcls}'>{ns['grade']} {ns['score']}점</span> "
+            f"&nbsp;{e(ns['title'])}</div>{weak}{comp_html}</div>")
+
+
+def _metrics_section(d) -> str:
+    e = html.escape
     m = d.get("metrics", {})
     total_bars = _svg_bars(m.get("series", []), "total", "#4a7dff")
     new_bars = _svg_bars(m.get("series", []), "new", "#5ddb8f")
-    krows = ""
-    for row in m.get("kw_rows", []):
-        krows += (f"<tr><td>{e(row['kw'])}</td>"
-                  f"<td>{_rank_badge(row['rank'], row['delta'])}</td></tr>")
+    krows = "".join(
+        f"<tr><td>{e(row['kw'])}</td><td>{_rank_badge(row['rank'], row['delta'])}</td></tr>"
+        for row in m.get("kw_rows", []))
     krows = krows or "<tr><td colspan=2 class='muted'>발행글이 색인되면 순위가 표시됩니다</td></tr>"
-    cum = m.get("cum_total")
-    p1 = m.get("kw_on_page1", 0)
-    tracked = m.get("kw_tracked", 0)
-
-    ns = d.get("next_seo")
-    if ns:
-        gcls = {"A": "ok", "B": "next", "C": "warn", "D": "bad"}.get(ns["grade"], "mut")
-        weak = ("<div class='muted' style='margin-top:6px'>보강 포인트: "
-                + ", ".join(_SEO_LABEL.get(w, w) for w in ns["weak"]) + "</div>") if ns.get("weak") else \
-               "<div class='muted' style='margin-top:6px'>모든 항목 통과</div>"
-        ci = ns.get("competitor")
-        comp_html = ""
-        if ci:
-            lg = ci.get("length_gap")
-            lentxt = ""
-            if ci.get("length_benchmark"):
-                lentxt = (f"경쟁 글 길이 중앙값 {ci['length_benchmark']}자"
-                          + (f" · 우리가 {abs(lg)}자 {'짧음 → 보강 권장' if lg and lg > 0 else '김'}"
-                             if lg else ""))
-            miss = (" · 보강 후보: " + ", ".join(ci["missing_terms"])) if ci.get("missing_terms") else ""
-            comp_html = f"<div class='muted' style='margin-top:6px'>경쟁 분석: {e(lentxt)}{e(miss)}</div>"
-        next_seo_html = (f"<div class='panel'><div class='ptit'>다음 발행글 SEO 점검</div>"
-                         f"<div><span class='badge {gcls}'>{ns['grade']} {ns['score']}점</span> "
-                         f"&nbsp;{e(ns['title'])}</div>{weak}{comp_html}</div>")
-    else:
-        next_seo_html = ""
-    effect_html = f"""
-<h2>효과 측정 — 방문자 추이</h2>
-<div class="cards">
-  <div class="card"><div class="k">누적 방문자</div><div class="v">{cum if cum is not None else '-'}</div></div>
-  <div class="card"><div class="k">오늘</div><div class="v">{m.get('today') if m.get('today') is not None else '-'}</div></div>
-  <div class="card"><div class="k">1페이지 노출 키워드</div><div class="v">{p1} <small>/ {tracked}개</small></div></div>
-</div>
+    when = f" · {e(m['rank_date'])} 기준" if m.get("rank_date") else ""
+    return f"""
+<h2>방문자 추이</h2>
 <div class="panel"><div class="ptit">일별 누적 방문자</div>{total_bars}</div>
 <div class="panel"><div class="ptit">일별 신규 방문자(누적 증가분)</div>{new_bars}</div>
-{next_seo_html}
-<h2>효과 측정 — 타깃 키워드 검색 순위 (네이버 블로그탭){f" · {e(m['rank_date'])} 기준" if m.get('rank_date') else ""}</h2>
+<h2>타깃 키워드 검색 순위 (네이버 블로그탭){when}</h2>
 <table><tr><th>타깃 검색어</th><th>우리 글 순위 (전일 대비)</th></tr>{krows}</table>
 <p class="muted">순위는 발행 후 자동 색인·수집됩니다. 검색량(월간 검색수)은 네이버 검색광고 API 키가 있으면 추가할 수 있습니다.</p>"""
 
-    live = shot_base == "/shot/"
+
+# ---------- 페이지 ----------
+
+def page_overview(d) -> str:
+    return (_alerts_html(d) + _kpi_cards(d) + _next_seo_panel(d)
+            + "<h2>다음 자동 실행</h2>" + _tasks_table(d))
+
+
+def page_analytics(d) -> str:
+    return _kpi_cards(d) + _metrics_section(d)
+
+
+def page_posts(d) -> str:
+    return (f"<h2>발행 큐 ({d['done']}/{d['total']})</h2>" + _queue_table(d)
+            + "<h2>최근 발행 기록</h2>" + _log_table(d))
+
+
+def page_seo(d) -> str:
+    e = html.escape
+    rows = ""
+    for q in sorted(d["queue"], key=lambda x: (x.get("seo") or {}).get("score", 999)):
+        seo = q.get("seo") or {}
+        if not seo:
+            continue
+        gc = {"A": "ok", "B": "next", "C": "warn", "D": "bad"}.get(seo["grade"], "mut")
+        weak = ", ".join(_SEO_LABEL.get(w, w) for w in seo.get("weak", [])) or "—"
+        st = STATUS_BADGE[q["status"]][0]
+        rows += (f"<tr><td><a href='/post?file={e(q['name'])}'>{e(q['name'])}</a></td>"
+                 f"<td><span class='badge {gc}'>{seo['grade']} {seo['score']}</span></td>"
+                 f"<td class='muted'>{st}</td><td class='muted'>{e(weak)}</td></tr>")
+    # 경쟁 분석(저장된 research)
+    comp = ""
+    for kw, r in _load_research().items():
+        gaps = ", ".join(r.get("gap_terms", [])) or "—"
+        b = r.get("length_benchmark")
+        comp += (f"<tr><td>{e(kw)}</td><td class='muted'>{len(r.get('competitors', []))}편</td>"
+                 f"<td class='muted'>{b if b else '-'}자</td><td class='muted'>{e(gaps)}</td></tr>")
+    comp = comp or "<tr><td colspan=4 class='muted'>아직 분석 데이터 없음(발행 시 자동 수집)</td></tr>"
+    return (_next_seo_panel(d)
+            + "<h2>전체 초안 SEO 점수 (낮은 순)</h2>"
+            + "<div class=scroll><table><tr><th>초안</th><th>점수</th><th>상태</th>"
+            + f"<th>보강 포인트</th></tr>{rows}</table></div>"
+            + "<h2>경쟁 글 분석 (키워드별)</h2>"
+            + "<table><tr><th>타깃 검색어</th><th>경쟁글</th><th>길이중앙값</th>"
+            + f"<th>보강 후보 단어</th></tr>{comp}</table>")
+
+
+def page_ops(d) -> str:
+    e = html.escape
+    last_ok = next((x for x in d["log"] if x.get("ok") and not x.get("dry")), None)
+    sess = (f"마지막 발행 성공: {e(str(last_ok.get('date')))} {e(str(last_ok.get('time','')))}"
+            if last_ok else "아직 성공 발행 없음")
+    health = (f"<div class='panel'><div class='ptit'>세션·상태</div>"
+              f"<div>{sess}</div>"
+              f"<div class='muted' style='margin-top:4px'>세션 만료 시: "
+              f"<code>.venv\\Scripts\\python.exe -m publish.naver login</code></div></div>")
+    return (_alerts_html(d)
+            + "<h2>자동 실행 스케줄</h2>" + _tasks_table(d)
+            + "<h2>상태</h2>" + health
+            + "<h2>마지막 실행 화면</h2><div class='shots'>" + _shots_html(d, "/shot/") + "</div>"
+            + "<h2>실행 로그 (최근)</h2><pre class='logbox'>" + e(_log_tail(40)) + "</pre>")
+
+
+def page_post_detail(d, fname: str) -> str:
+    e = html.escape
+    fname = Path(fname).name
+    p = ROOT / "drafts" / fname
+    if p.suffix != ".md" or not p.is_file():
+        return "<h2>초안을 찾을 수 없습니다</h2><p><a href='/posts'>← 발행</a></p>"
+    try:
+        parsed = parse_draft(p)
+    except Exception as ex:
+        return f"<h2>파싱 실패</h2><p class='muted'>{e(str(ex))}</p>"
+    try:
+        import seo as seomod
+        sr = seomod.score_draft(p)
+    except Exception:
+        sr = None
+    body = ""
+    for b in parsed["blocks"]:
+        if b["kind"] == "heading":
+            body += f"<h4>{e(b['text'])}</h4>"
+        elif b["kind"] == "image":
+            body += f"<div class='imgslot'>🖼 이미지 — {e(b.get('alt') or '(캡션 없음)')}</div>"
+        else:
+            body += f"<p>{e(b['text'])}</p>"
+    tags = " ".join(f"#{e(t)}" for t in parsed["tags"])
+    seo_html = ""
+    if sr:
+        gc = {"A": "ok", "B": "next", "C": "warn", "D": "bad"}.get(sr["grade"], "mut")
+        checks = "".join(
+            f"<tr><td>{_SEO_LABEL.get(c['name'], c['name'])}</td>"
+            f"<td>{c['pts']}/{c['max']}</td><td class='muted'>{e(c['detail'])}</td></tr>"
+            for c in sr["checks"])
+        seo_html = (f"<h2>SEO <span class='badge {gc}'>{sr['grade']} {sr['score']}점</span></h2>"
+                    f"<table><tr><th>항목</th><th>점수</th><th>상세</th></tr>{checks}</table>")
+    return (f"<p><a href='/posts'>← 발행</a></p><h2>{e(parsed['title'])}</h2>"
+            f"<div class='muted'>{e(fname)} · 태그: {tags}</div>"
+            f"{seo_html}<h2>본문 미리보기</h2><div class='preview'>{body}</div>")
+
+
+PAGES = {
+    "/": ("개요", page_overview),
+    "/analytics": ("성과", page_analytics),
+    "/posts": ("발행", page_posts),
+    "/seo": ("콘텐츠·SEO", page_seo),
+    "/ops": ("상태", page_ops),
+}
+
+
+def _nav(active: str) -> str:
+    return "<div class='nav'>" + "".join(
+        f"<a href='{path}' class='{'on' if path == active else ''}'>{label}</a>"
+        for path, label in NAV) + "</div>"
+
+
+def layout(active: str, body: str, live: bool, stamp: str, title="개요") -> str:
     refresh = '<meta http-equiv="refresh" content="30">' if live else ""
     sub = ("30초마다 자동 새로고침 · 읽기 전용" if live
-           else f"고정 스냅샷 ({d['stamp']} 기준) · 최신화하려면 snapshot 다시 실행")
-    # 콘솔 창 없이 띄우면 Ctrl+C 로 못 끄므로 UI 에 종료 버튼을 둔다.
+           else f"고정 스냅샷 ({stamp} 기준)")
     quit_btn = ("""<button id="quit" onclick="fetch('/quit',{method:'POST'})
       .then(()=>document.body.innerHTML='<div class=wrap><h1>종료했습니다</h1>'
       +'<div class=sub>이 탭은 닫으셔도 됩니다.</div></div>')">■ 종료</button>""" if live else "")
-
+    nav = _nav(active) if live else ""
     return f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
-<title>SNS Agent 대시보드</title>{refresh}
+<title>SNS Agent · {title}</title>{refresh}
 <style>{CSS}</style></head><body><div class="wrap">
-<div class="top"><div>
-<h1>SNS Agent 대시보드</h1>
-<div class="sub">{sub}</div>
-</div>{quit_btn}</div>
-{alert_html}{cards}
-{effect_html}
-<h2>자동 실행 스케줄</h2>
-<table><tr><th>작업</th><th>다음 실행</th><th>마지막 실행</th><th>마지막 결과</th></tr>{trows}</table>
-<h2>발행 큐 ({d['done']}/{d['total']})</h2>
-<div class="scroll"><table><tr><th>#</th><th>상태</th><th>파일</th><th>제목</th></tr>{qrows}</table></div>
-<h2>최근 발행 기록</h2>
-<table><tr><th>날짜</th><th>초안</th><th>모드</th><th>이미지</th><th>SEO</th><th>결과</th></tr>{lrows}</table>
-<h2>마지막 실행 화면</h2>
-<div class="shots">{shots}</div>
-<div class="foot">scheduler.py 상태 파일: data/publish_state.json</div>
+<div class="top"><div><h1>SNS Agent 대시보드</h1><div class="sub">{sub}</div></div>{quit_btn}</div>
+{nav}{body}
+<div class="foot">상태 파일: data/publish_state.json · 지표: data/metrics.json</div>
 </div></body></html>"""
+
+
+def render(d: dict, shot_base: str = "/shot/", page: str = "/", query: dict | None = None) -> str:
+    """페이지 라우터. page 경로에 맞는 본문을 만들어 공통 레이아웃으로 감싼다."""
+    live = shot_base == "/shot/"
+    if page == "/post":
+        fname = (query or {}).get("file", "")
+        body = page_post_detail(d, fname)
+        return layout("/posts", body, live, d["stamp"], title="글 미리보기")
+    label, fn = PAGES.get(page, PAGES["/"])
+    return layout(page if page in PAGES else "/", fn(d), live, d["stamp"], title=label)
+
+
+_cache = {"t": 0.0, "data": None}
+
+
+def cached_collect(ttl: float = 8.0) -> dict:
+    """collect() 는 무겁다(schtasks + 30편 채점). 짧은 TTL 로 페이지 전환을 빠르게."""
+    import time as _t
+    now = _t.time()
+    if _cache["data"] is None or now - _cache["t"] > ttl:
+        _cache["data"] = collect()
+        _cache["t"] = now
+    return _cache["data"]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -539,12 +730,16 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.send_error(404)
             return
-        if self.path.rstrip("/") in ("", "/api"):
-            if self.path.rstrip("/") == "/api":
-                self._send(json.dumps(collect(), ensure_ascii=False).encode(),
-                           "application/json; charset=utf-8")
-            else:
-                self._send(render(collect()).encode(), "text/html; charset=utf-8")
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        if path == "/api":
+            self._send(json.dumps(cached_collect(), ensure_ascii=False).encode(),
+                       "application/json; charset=utf-8")
+            return
+        if path == "/" or path in PAGES or path == "/post":
+            query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+            html_out = render(cached_collect(), page=path, query=query)
+            self._send(html_out.encode(), "text/html; charset=utf-8")
             return
         self.send_error(404)
 
