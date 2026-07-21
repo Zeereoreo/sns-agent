@@ -88,6 +88,13 @@ Get-ScheduledTask -TaskName 'SNS-Agent-*' | ForEach-Object {
 """
 
 
+def _load_json(path: Path, default):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return default
+
+
 def _norm_code(v) -> str:
     """작업 결과 코드를 부호 있는 32비트 문자열로 통일한다.
 
@@ -139,6 +146,44 @@ def task_info() -> list[dict]:
     return out
 
 
+def _metrics_view() -> dict:
+    """data/metrics.json → 대시보드용 방문자 시계열 + 키워드 순위."""
+    raw = _load_json(ROOT / "data" / "metrics.json",
+                     {"visitors": {}, "ranks": {}, "keywords": {}})
+    vis = raw.get("visitors", {})
+    days = sorted(vis)
+    series = []
+    prev_total = None
+    for d in days:
+        total = vis[d].get("total")
+        new = (total - prev_total) if (prev_total is not None and total is not None) else None
+        series.append({"date": d, "total": total, "today": vis[d].get("today"), "new": new})
+        prev_total = total
+
+    ranks = raw.get("ranks", {})
+    rdays = sorted(ranks)
+    latest = ranks.get(rdays[-1], {}) if rdays else {}
+    prev = ranks.get(rdays[-2], {}) if len(rdays) >= 2 else {}
+    kw_rows = []
+    for kw, r in sorted(latest.items(), key=lambda kv: (kv[1] is None, kv[1] or 99)):
+        pr = prev.get(kw)
+        delta = None
+        if isinstance(r, int) and isinstance(pr, int):
+            delta = pr - r          # +면 순위 상승(숫자 작아짐)
+        kw_rows.append({"kw": kw, "rank": r, "delta": delta})
+    on_p1 = sum(1 for x in kw_rows if isinstance(x["rank"], int) and x["rank"] <= 10)
+
+    return {
+        "series": series,
+        "cum_total": series[-1]["total"] if series else None,
+        "today": series[-1]["today"] if series else None,
+        "kw_rows": kw_rows,
+        "kw_tracked": len(kw_rows),
+        "kw_on_page1": on_p1,
+        "rank_date": rdays[-1] if rdays else None,
+    }
+
+
 def collect() -> dict:
     state = scheduler._load_state()
     drafts = scheduler._ordered_drafts()
@@ -177,6 +222,7 @@ def collect() -> dict:
         "stamp": f"{datetime.now():%Y-%m-%d %H:%M}",
         "days_left": remaining // per_day,
         "last_fail": last_fail,
+        "metrics": _metrics_view(),
         "blog": config.NAVER_BLOG_ID or "(미설정)",
         "max_per_day": config.MAX_POSTS_PER_DAY,
         "today_ok": sum(1 for e in state["log"] if e.get("date") == today and e.get("ok")),
@@ -223,6 +269,12 @@ tr:hover td{background:#151920}
 .alert{background:#3a1618;border:1px solid #5b2327;color:#ffb3b8;padding:12px 14px;border-radius:10px;margin-bottom:20px}
 .alert code{background:#00000040;padding:1px 5px;border-radius:4px}
 .foot{color:#5d6675;font-size:12px;margin-top:34px}
+.muted{color:#8b93a1;font-size:12.5px}
+.panel{background:#171a21;border:1px solid #232833;border-radius:10px;padding:14px 16px;margin:10px 0}
+.panel .ptit{color:#8b93a1;font-size:12px;margin-bottom:8px}
+.chart{display:block;overflow:visible}
+.chart .bval{fill:#c9d1dc;font-size:11px}
+.chart .blab{fill:#6b7280;font-size:10px}
 .top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
 #quit{background:#232833;color:#c9d1dc;border:1px solid #333b49;border-radius:8px;
  padding:7px 14px;font:inherit;font-size:12.5px;cursor:pointer}
@@ -249,6 +301,41 @@ def _reason(r) -> tuple[str, str]:
     if str(r).startswith("exception:"):
         return (str(r)[:80], "bad")
     return REASON_TEXT.get(str(r), (str(r), "warn"))
+
+
+def _svg_bars(series: list, key: str, color: str) -> str:
+    """방문자 시계열을 인라인 SVG 막대그래프로. 외부 라이브러리 없음(CSP 안전)."""
+    pts = [(x["date"], x.get(key)) for x in series if isinstance(x.get(key), int)]
+    if not pts:
+        return "<p class='muted'>데이터가 아직 없습니다. 매 발행 시 자동으로 쌓입니다.</p>"
+    vals = [v for _, v in pts]
+    vmax = max(vals) or 1
+    n = len(pts)
+    W, H, pad = max(n * 42, 120), 150, 22
+    bw = min(30, (W - pad) / n - 8)
+    bars = []
+    for i, (dt, v) in enumerate(pts):
+        h = (v / vmax) * (H - pad - 18)
+        x = pad + i * ((W - pad) / n)
+        y = H - pad - h
+        label = dt[5:]  # MM-DD
+        bars.append(
+            f'<rect x="{x:.0f}" y="{y:.0f}" width="{bw:.0f}" height="{h:.0f}" rx="3" fill="{color}"/>'
+            f'<text x="{x + bw/2:.0f}" y="{y - 4:.0f}" text-anchor="middle" class="bval">{v}</text>'
+            f'<text x="{x + bw/2:.0f}" y="{H - 6:.0f}" text-anchor="middle" class="blab">{label}</text>')
+    return (f'<svg viewBox="0 0 {W:.0f} {H}" width="100%" height="{H}" '
+            f'preserveAspectRatio="xMinYMid meet" class="chart">{"".join(bars)}</svg>')
+
+
+def _rank_badge(rank, delta) -> str:
+    if not isinstance(rank, int):
+        return "<span class='badge mut'>30위권 밖</span>"
+    cls = "ok" if rank <= 10 else ("warn" if rank <= 20 else "mut")
+    arrow = ""
+    if isinstance(delta, int) and delta != 0:
+        arrow = (f" <span style='color:#5ddb8f'>▲{delta}</span>" if delta > 0
+                 else f" <span style='color:#ff8087'>▼{-delta}</span>")
+    return f"<span class='badge {cls}'>{rank}위</span>{arrow}"
 
 
 def render(d: dict, shot_base: str = "/shot/") -> str:
@@ -320,6 +407,31 @@ def render(d: dict, shot_base: str = "/shot/") -> str:
         f'<figure><img src="{shot_base}{e(s)}" alt="{e(s)}"><figcaption>{e(s)}</figcaption></figure>'
         for s in d["shots"]) or "<p style='color:#8b93a1'>스크린샷 없음</p>"
 
+    # --- 효과 측정 섹션 (방문자 추이 + 키워드 순위) ---
+    m = d.get("metrics", {})
+    total_bars = _svg_bars(m.get("series", []), "total", "#4a7dff")
+    new_bars = _svg_bars(m.get("series", []), "new", "#5ddb8f")
+    krows = ""
+    for row in m.get("kw_rows", []):
+        krows += (f"<tr><td>{e(row['kw'])}</td>"
+                  f"<td>{_rank_badge(row['rank'], row['delta'])}</td></tr>")
+    krows = krows or "<tr><td colspan=2 class='muted'>발행글이 색인되면 순위가 표시됩니다</td></tr>"
+    cum = m.get("cum_total")
+    p1 = m.get("kw_on_page1", 0)
+    tracked = m.get("kw_tracked", 0)
+    effect_html = f"""
+<h2>효과 측정 — 방문자 추이</h2>
+<div class="cards">
+  <div class="card"><div class="k">누적 방문자</div><div class="v">{cum if cum is not None else '-'}</div></div>
+  <div class="card"><div class="k">오늘</div><div class="v">{m.get('today') if m.get('today') is not None else '-'}</div></div>
+  <div class="card"><div class="k">1페이지 노출 키워드</div><div class="v">{p1} <small>/ {tracked}개</small></div></div>
+</div>
+<div class="panel"><div class="ptit">일별 누적 방문자</div>{total_bars}</div>
+<div class="panel"><div class="ptit">일별 신규 방문자(누적 증가분)</div>{new_bars}</div>
+<h2>효과 측정 — 타깃 키워드 검색 순위 (네이버 블로그탭){f" · {e(m['rank_date'])} 기준" if m.get('rank_date') else ""}</h2>
+<table><tr><th>타깃 검색어</th><th>우리 글 순위 (전일 대비)</th></tr>{krows}</table>
+<p class="muted">순위는 발행 후 자동 색인·수집됩니다. 검색량(월간 검색수)은 네이버 검색광고 API 키가 있으면 추가할 수 있습니다.</p>"""
+
     live = shot_base == "/shot/"
     refresh = '<meta http-equiv="refresh" content="30">' if live else ""
     sub = ("30초마다 자동 새로고침 · 읽기 전용" if live
@@ -337,6 +449,7 @@ def render(d: dict, shot_base: str = "/shot/") -> str:
 <div class="sub">{sub}</div>
 </div>{quit_btn}</div>
 {alert_html}{cards}
+{effect_html}
 <h2>자동 실행 스케줄</h2>
 <table><tr><th>작업</th><th>다음 실행</th><th>마지막 실행</th><th>마지막 결과</th></tr>{trows}</table>
 <h2>발행 큐 ({d['done']}/{d['total']})</h2>

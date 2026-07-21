@@ -123,6 +123,14 @@ def run(dry_run: bool = True) -> None:
         if reason == "session_expired":
             print("  → 세션 만료입니다. `python -m publish.naver login` 으로 다시 로그인하세요.")
 
+    # 효과 지표 수집(방문자 매회, 키워드 순위는 하루 1회). 발행 성공/실패와 무관, 실패해도 무시.
+    if not dry_run:
+        try:
+            import metrics  # noqa: PLC0415
+            metrics.collect()
+        except Exception as e:
+            print("지표 수집 건너뜀:", e)
+
 
 def status() -> None:
     s = _load_state()
