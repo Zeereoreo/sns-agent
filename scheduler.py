@@ -193,6 +193,7 @@ def _run(dry_run: bool = True) -> None:
                      "images": res.get("images_inserted", 0),
                      "planned_images": len(picks),
                      "seo_score": seo_score, "seo_grade": seo_grade,
+                     "title": res.get("title"),   # 발행에 쓰인 제목(A/B 로테이션 관찰용)
                      "reason": reason, "url": res.get("url")})
     _save_state(s)
     if ok:

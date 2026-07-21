@@ -24,19 +24,49 @@ def _clean_inline(s: str) -> str:
     return s.strip()
 
 
+def _title_ok(t: str, kw: str) -> bool:
+    """로테이션 후보로 쓸 만한지: 길이 적정 + 키워드 토큰 대부분 포함."""
+    if not t or len(t) > 44:
+        return False
+    toks = [w for w in kw.split() if len(w) > 1]
+    if not toks:
+        return True
+    return sum(1 for w in toks if w in t) >= max(1, len(toks) - 1)
+
+
+def _choose_title(cands: list[str], kw: str, name: str) -> str:
+    """초안 파일명 기반 결정론적 선택(프로세스 재시작해도 동일). 후보2 안전할 때만 로테이션."""
+    if not cands:
+        return "제목 없음"
+    if len(cands) < 2 or not _title_ok(cands[1], kw):
+        return cands[0]
+    # 안정적 해시(파이썬 hash는 프로세스마다 달라 사용 불가)
+    h = sum(ord(c) for c in Path(name).name)
+    return cands[h % 2]
+
+
 def parse_draft(path: str | Path) -> dict:
     text = Path(path).read_text(encoding="utf-8")
     comment = _extract_comment(text)
     body = re.sub(r"<!--.*?-->", "", text, flags=re.S).strip()
 
-    # --- 제목: 메타의 '제목안: 1)' 우선, 없으면 첫 H1 ---
-    title = None
-    m = re.search(r"제목안[:\s]*1\)\s*(.+)", comment)
-    if m:
-        title = m.group(1).strip()
-    if not title:
+    # --- 제목 후보 수집: 'N) ...' 형태(제목안 1)/2)). 라벨은 1)줄에만 있어 번호로 잡는다 ---
+    cands = []
+    for m in re.finditer(r"(?:^|\s)\d\)\s*([^\n]+)", comment, re.M):
+        c = m.group(1).strip()
+        if c and c not in cands:
+            cands.append(c)
+    if not cands:
         m = re.search(r"^#\s+(.+)$", body, re.M)
-        title = m.group(1).strip() if m else "제목 없음"
+        cands = [m.group(1).strip()] if m else ["제목 없음"]
+
+    # 타깃 키워드(로테이션 안전장치용)
+    mk = re.search(r"타깃\s*검색키워드[^:]*:\s*(.+)", comment)
+    kw = re.split(r"[,/·\n]", mk.group(1).strip())[0].strip() if mk else ""
+
+    # --- A/B 로테이션: 초안별 결정론적으로 후보 1/2 중 선택(제목 footprint 완화).
+    #     단, 후보2가 '발행 가능'할 때만(키워드 포함 + 길이≤44). 아니면 후보1 고정. ---
+    title = _choose_title(cands, kw, str(path))
 
     # --- 태그: 메타의 '태그:' 우선, 없으면 본문 마지막 해시태그 줄 ---
     tags: list[str] = []
@@ -71,7 +101,7 @@ def parse_draft(path: str | Path) -> dict:
             continue
         blocks.append({"kind": "text", "text": _clean_inline(line)})
 
-    return {"title": title, "tags": tags, "blocks": blocks}
+    return {"title": title, "titles": cands, "tags": tags, "blocks": blocks}
 
 
 if __name__ == "__main__":

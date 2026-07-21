@@ -1112,8 +1112,15 @@ def page_post_detail(d, fname: str) -> str:
             for c in sr["checks"])
         seo_html = (f"<h2>SEO <span class='badge {gc}'>{sr['grade']} {sr['score']}점</span></h2>"
                     f"<table><tr><th>항목</th><th>점수</th><th>상세</th></tr>{checks}</table>")
+    alts = parsed.get("titles", [])
+    alt_html = ""
+    if len(alts) >= 2:
+        others = [t for t in alts if t != parsed["title"]]
+        if others:
+            alt_html = ("<div class='muted' style='margin-top:4px'>제목 A/B: 이 글은 "
+                        f"위 제목으로 발행됩니다(초안별 고정 선택). 대체 후보: {e(' / '.join(others))}</div>")
     return (f"<p><a href='/posts'>← 발행</a></p><h2>{e(parsed['title'])}</h2>"
-            f"<div class='muted'>{e(fname)} · 태그: {tags}</div>"
+            f"<div class='muted'>{e(fname)} · 태그: {tags}</div>{alt_html}"
             f"{seo_html}{imgs_html}<h2>본문 미리보기</h2><div class='preview'>{body}</div>")
 
 
