@@ -19,7 +19,7 @@ import subprocess
 import sys
 import threading
 import webbrowser
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -358,6 +358,7 @@ tr:hover td{background:#151920}
 .emph{background:#141a14;border:1px solid #2a4d2f;border-radius:8px;padding:10px 12px;margin:10px 0;color:#8fd6a0;font-size:13px}
 .dlbar{background:#171a21;border:1px solid #232833;border-radius:8px;padding:10px 14px;margin:0 0 8px;font-size:13px}
 .dl{font-size:12px;font-weight:400;margin-left:8px}
+.dayrow td{background:#141821;color:#8fb2e0;font-weight:600;font-size:12px}
 """
 
 STATUS_BADGE = {"done": ("발행됨", "ok"), "next": ("다음 차례", "next"), "wait": ("대기", "mut")}
@@ -423,7 +424,7 @@ def _rank_badge(rank, delta) -> str:
     return f"<span class='badge {cls}'>{rank}위</span>{arrow}"
 
 
-NAV = [("/", "개요"), ("/analytics", "성과"), ("/posts", "발행"),
+NAV = [("/", "개요"), ("/analytics", "성과"), ("/posts", "발행"), ("/calendar", "캘린더"),
        ("/seo", "콘텐츠·SEO"), ("/images", "이미지"), ("/settings", "설정"),
        ("/diag", "진단"), ("/ops", "상태")]
 
@@ -652,6 +653,60 @@ def _metrics_section(d) -> str:
 def page_overview(d) -> str:
     return (_alerts_html(d) + _kpi_cards(d) + _next_seo_panel(d)
             + "<h2>다음 자동 실행</h2>" + _tasks_table(d))
+
+
+_SLOT_TIMES = [(9, 7), (13, 23), (18, 41)]   # 작업 스케줄러 트리거(±0~9분 지터)
+
+
+def _upcoming_slots(count: int, today_used: int, cap: int):
+    """앞으로의 발행 예정 시각 count개. 오늘 남은 슬롯(미래 시각·상한 내)부터."""
+    now = datetime.now()
+    slots = []
+    day = 0
+    while len(slots) < count and day < 60:
+        base = now.date() + timedelta(days=day)
+        used_today = today_used if day == 0 else 0
+        room = cap - used_today
+        for h, mi in _SLOT_TIMES:
+            if room <= 0:
+                break
+            dt = datetime(base.year, base.month, base.day, h, mi)
+            if dt <= now:            # 이미 지난 시각은 건너뜀
+                continue
+            slots.append(dt)
+            room -= 1
+            if len(slots) >= count:
+                break
+        day += 1
+    return slots
+
+
+def page_calendar(d) -> str:
+    e = html.escape
+    pending = [q for q in d["queue"] if q["status"] in ("next", "wait")]
+    slots = _upcoming_slots(len(pending), d["today_ok"], max(d["max_per_day"], 1))
+    rows, last_day = "", None
+    for q, dt in zip(pending, slots):
+        day = f"{dt:%Y-%m-%d (%a)}"
+        if day != last_day:
+            rows += (f"<tr class='dayrow'><td colspan=4>{e(day)}</td></tr>")
+            last_day = day
+        seo = q.get("seo") or {}
+        sb = ""
+        if seo:
+            gc = {"A": "ok", "B": "next", "C": "warn", "D": "bad"}.get(seo["grade"], "mut")
+            sb = f"<span class='badge {gc}'>{seo['grade']} {seo['score']}</span>"
+        rows += (f"<tr><td>{dt:%H:%M}</td>"
+                 f"<td><a href='/post?file={e(q['name'])}'>{e(q['name'])}</a></td>"
+                 f"<td>{e(q['title'])}</td><td>{sb}</td></tr>")
+    if not rows:
+        rows = "<tr><td colspan=4 class='muted'>발행할 초안이 없습니다</td></tr>"
+    note = (f"<p class='muted'>하루 {d['max_per_day']}편 · 발행 시각 09:07 / 13:23 / 18:41 "
+            "(± 0~9분 랜덤). 오늘 남은 슬롯부터 순서대로 배정한 예상입니다 "
+            "(실패 시 밀리며, 새 초안·상한 변경 시 달라집니다).</p>")
+    return (f"<h2>발행 예정 캘린더 (남은 {len(pending)}편)</h2>{note}"
+            f"<div class='scroll'><table><tr><th>시각</th><th>초안</th><th>제목</th>"
+            f"<th>SEO</th></tr>{rows}</table></div>")
 
 
 def page_analytics(d) -> str:
@@ -990,6 +1045,7 @@ PAGES = {
     "/": ("개요", page_overview),
     "/analytics": ("성과", page_analytics),
     "/posts": ("발행", page_posts),
+    "/calendar": ("캘린더", page_calendar),
     "/seo": ("콘텐츠·SEO", page_seo),
     "/images": ("이미지", page_images),
     "/settings": ("설정", page_settings),
