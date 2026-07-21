@@ -709,12 +709,36 @@ def page_calendar(d) -> str:
             f"<th>SEO</th></tr>{rows}</table></div>")
 
 
+_refresh = {"running": False, "msg": ""}
+
+
+def _refresh_metrics_bg():
+    """방문자·순위·세션을 즉시 재수집(백그라운드 스레드)."""
+    try:
+        import metrics
+        metrics.collect(force_ranks=True)
+        _refresh["msg"] = "완료"
+    except Exception as ex:
+        _refresh["msg"] = f"실패: {ex}"
+    finally:
+        _refresh["running"] = False
+        _cache["data"] = None
+
+
 def page_analytics(d) -> str:
     dl = ("<div class='dlbar'>클라이언트 보고용 내보내기: "
           "<a href='/export/metrics.csv'>방문자·순위 CSV</a> · "
           "<a href='/export/history.csv'>발행 이력 CSV</a> "
           "<span class='muted'>(엑셀에서 바로 열림)</span></div>")
-    return _kpi_cards(d) + dl + _metrics_section(d)
+    if _refresh["running"]:
+        act = ("<div class='dlbar'>⏳ 지표 수집 중… 30~60초 걸립니다. "
+               "잠시 후 새로고침하면 최신 순위가 반영됩니다.</div>")
+    else:
+        last = f" <span class='muted'>({_refresh['msg']})</span>" if _refresh["msg"] else ""
+        act = ("<div class='dlbar'>지금 최신 데이터 가져오기: "
+               "<form method='POST' action='/refresh-metrics' style='display:inline'>"
+               f"<button type='submit'>순위·방문자 새로고침</button></form>{last}</div>")
+    return _kpi_cards(d) + dl + act + _metrics_section(d)
 
 
 def page_posts(d) -> str:
@@ -1174,6 +1198,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/save-emphasis":
             self._handle_save_emphasis()
+            return
+        if self.path == "/refresh-metrics":
+            if not _refresh["running"]:
+                _refresh["running"] = True
+                _refresh["msg"] = ""
+                threading.Thread(target=_refresh_metrics_bg, daemon=True).start()
+            self._redirect("/analytics?refresh=1")
             return
         if self.path == "/test-notify":
             try:
