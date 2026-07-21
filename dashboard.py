@@ -424,7 +424,8 @@ def _rank_badge(rank, delta) -> str:
 
 
 NAV = [("/", "개요"), ("/analytics", "성과"), ("/posts", "발행"),
-       ("/seo", "콘텐츠·SEO"), ("/images", "이미지"), ("/settings", "설정"), ("/ops", "상태")]
+       ("/seo", "콘텐츠·SEO"), ("/images", "이미지"), ("/settings", "설정"),
+       ("/diag", "진단"), ("/ops", "상태")]
 
 
 def _log_tail(n: int = 40) -> str:
@@ -701,6 +702,110 @@ def _session_view(d):
     return _load_json(ROOT / "data" / "metrics.json", {}).get("session")
 
 
+def run_diagnostics(d) -> list[dict]:
+    """운영 상태 일괄 점검. [{name, level(ok/warn/bad), detail, fix}]."""
+    checks = []
+
+    def add(name, level, detail, fix=""):
+        checks.append({"name": name, "level": level, "detail": detail, "fix": fix})
+
+    # 1) 대상 블로그 설정
+    if config.NAVER_BLOG_ID:
+        add("대상 블로그", "ok", config.NAVER_BLOG_ID)
+    else:
+        add("대상 블로그", "bad", "NAVER_BLOG_ID 미설정", ".env 에 NAVER_BLOG_ID 지정")
+
+    # 2) 세션
+    sv = _session_view(d)
+    if sv is None:
+        add("네이버 세션", "warn", "점검 데이터 없음(다음 수집 시 생성)")
+    elif sv.get("ok"):
+        add("네이버 세션", "ok", f"정상 ({sv.get('checked','')})")
+    else:
+        add("네이버 세션", "bad", "만료됨", "python -m publish.naver login")
+
+    # 3) 작업 스케줄러
+    bad_tasks = [t for t in d["tasks"] if t["level"] == "bad"]
+    batt = [t["name"] for t in d["tasks"] if t.get("battery_block")]
+    if batt:
+        add("자동 실행 작업", "bad", f"배터리 차단: {', '.join(batt)}", "작업 설정에서 배터리 조건 해제")
+    elif bad_tasks:
+        add("자동 실행 작업", "warn", f"{len(bad_tasks)}개 경고 상태")
+    else:
+        add("자동 실행 작업", "ok", f"{len(d['tasks'])}개 정상")
+
+    # 4) 초안 파싱
+    fails, thin = [], []
+    for p in scheduler._ordered_drafts():
+        try:
+            pd = parse_draft(p)
+            if not pd["title"] or pd["title"] == "제목 없음":
+                fails.append(p.name)
+        except Exception:
+            fails.append(p.name)
+    if fails:
+        add("초안 파싱", "bad", f"{len(fails)}개 실패: {', '.join(fails[:3])}")
+    else:
+        add("초안 파싱", "ok", f"{d['total']}편 정상")
+
+    # 5) 큐 잔량
+    left = d["total"] - d["done"]
+    if left == 0:
+        add("발행 큐", "bad", "비었음 — 발행 멈춤", "초안 추가 필요")
+    elif d["days_left"] <= 3:
+        add("발행 큐", "warn", f"{left}편(약 {d['days_left']}일치) 남음")
+    else:
+        add("발행 큐", "ok", f"{left}편(약 {d['days_left']}일치)")
+
+    # 6) 이미지 풀(세그먼트별)
+    img = d["images"]
+    pool = [p for p in imgmod._imgs(imgmod.PHOTO_DIR) if p.parent == imgmod.PHOTO_DIR]
+    segs = {s: sum(1 for p in pool if p.name[:2] == f"{s}_") for s in "abc"}
+    missing = [s for s in "abc" if segs[s] == 0]
+    if img["pool"] == 0 and img["inbox"] == 0:
+        add("사진 풀", "warn", "비었음 — 인포그래픽만 삽입", "이미지 탭에서 업로드")
+    elif missing:
+        add("사진 풀", "warn", f"세그먼트 {','.join(missing)} 사진 없음 (a{segs['a']}/b{segs['b']}/c{segs['c']})")
+    else:
+        add("사진 풀", "ok", f"a{segs['a']} · b{segs['b']} · c{segs['c']} · 인박스{img['inbox']}")
+
+    # 7) 상태 파일
+    ok_state = (ROOT / "data" / "publish_state.json").exists()
+    add("상태 파일", "ok" if ok_state else "warn",
+        "publish_state.json 정상" if ok_state else "아직 없음(첫 발행 시 생성)")
+
+    # 8) 강조 포인트(정보)
+    emph = config.load_emphasis()
+    add("강조 포인트", "ok" if emph else "warn",
+        f"{len(emph)}개 설정됨" if emph else "미설정(선택)",
+        "" if emph else "설정 탭에서 입력(선택)")
+
+    return checks
+
+
+def page_diag(d) -> str:
+    e = html.escape
+    checks = run_diagnostics(d)
+    n_bad = sum(1 for c in checks if c["level"] == "bad")
+    n_warn = sum(1 for c in checks if c["level"] == "warn")
+    if n_bad:
+        head = f"<div class='alert'>🔴 문제 {n_bad}건 — 조치가 필요합니다.</div>"
+    elif n_warn:
+        head = f"<div class='okbar' style='background:#3a2e12;border-color:#5c4a1e;color:#f0c463'>🟡 주의 {n_warn}건 · 심각 문제 없음</div>"
+    else:
+        head = "<div class='okbar'>✅ 모든 점검 통과 — 정상 가동 중</div>"
+    rows = ""
+    lbl = {"ok": ("정상", "ok"), "warn": ("주의", "warn"), "bad": ("문제", "bad")}
+    for c in checks:
+        t, cls = lbl[c["level"]]
+        fix = f"<span class='muted'> · {e(c['fix'])}</span>" if c["fix"] else ""
+        rows += (f"<tr><td>{e(c['name'])}</td><td><span class='badge {cls}'>{t}</span></td>"
+                 f"<td>{e(c['detail'])}{fix}</td></tr>")
+    return (head + "<h2>운영 진단</h2>"
+            + f"<table><tr><th>항목</th><th>상태</th><th>상세</th></tr>{rows}</table>"
+            + "<p class='muted'>이 페이지는 열 때마다 다시 점검합니다. 문제 항목의 조치를 따르세요.</p>")
+
+
 def page_ops(d) -> str:
     e = html.escape
     last_ok = next((x for x in d["log"] if x.get("ok") and not x.get("dry")), None)
@@ -888,6 +993,7 @@ PAGES = {
     "/seo": ("콘텐츠·SEO", page_seo),
     "/images": ("이미지", page_images),
     "/settings": ("설정", page_settings),
+    "/diag": ("진단", page_diag),
     "/ops": ("상태", page_ops),
 }
 
