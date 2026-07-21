@@ -773,6 +773,24 @@ def page_post_detail(d, fname: str) -> str:
         sr = seomod.score_draft(p)
     except Exception:
         sr = None
+    # 이 글에 실제로 들어갈 이미지 미리보기(회전 인덱스 건드리지 않음)
+    n_slot = sum(1 for b in parsed["blocks"] if b["kind"] == "image")
+    imgs_html = ""
+    try:
+        picks, _ = imgmod.pick_images(p, n_slot, advance=False)
+        cells = ""
+        for pth in picks:
+            kind = "인포그래픽" if pth.parent == imgmod.IMG_DIR else (
+                "인박스" if pth.parent == imgmod.INBOX_DIR else "사진풀")
+            cells += (f"<figure class='ph'><img src='/photo/{e(pth.name)}' loading='lazy'>"
+                      f"<figcaption>{kind}<br>{e(pth.name)}</figcaption></figure>")
+        imgs_html = (f"<h2>이 글에 들어갈 이미지 ({len(picks)}/{n_slot}장)</h2>"
+                     f"<div class='phgrid'>{cells}</div>"
+                     "<p class='muted'>인박스에 새 사진을 올리면 여기 우선 반영됩니다 "
+                     "(<a href='/images'>이미지 관리</a>).</p>")
+    except Exception:
+        pass
+
     emphasis = config.load_emphasis()
     emph_html = ("<div class='emph'>" + "<br>".join(f"✅ {e(p)}" for p in emphasis) + "</div>") if emphasis else ""
     body = ""
@@ -799,7 +817,7 @@ def page_post_detail(d, fname: str) -> str:
                     f"<table><tr><th>항목</th><th>점수</th><th>상세</th></tr>{checks}</table>")
     return (f"<p><a href='/posts'>← 발행</a></p><h2>{e(parsed['title'])}</h2>"
             f"<div class='muted'>{e(fname)} · 태그: {tags}</div>"
-            f"{seo_html}<h2>본문 미리보기</h2><div class='preview'>{body}</div>")
+            f"{seo_html}{imgs_html}<h2>본문 미리보기</h2><div class='preview'>{body}</div>")
 
 
 PAGES = {

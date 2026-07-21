@@ -71,8 +71,9 @@ def _save_rot(i: int) -> None:
     ROT_FILE.write_text(json.dumps({"i": i}))
 
 
-def pick_images(draft_path, n: int) -> tuple[list[Path], list[Path]]:
-    """(삽입할 이미지 경로들, 소진한 인박스 사진들) 반환. n = 초안의 이미지 자리 수."""
+def pick_images(draft_path, n: int, advance: bool = True) -> tuple[list[Path], list[Path]]:
+    """(삽입할 이미지 경로들, 소진한 인박스 사진들) 반환. n = 초안의 이미지 자리 수.
+    advance=False 면 순환 인덱스를 저장하지 않는다(대시보드 미리보기용, 부작용 없음)."""
     n = max(int(n), 1)
     code = draft_code(draft_path)
     picks: list[Path] = []
@@ -104,7 +105,8 @@ def pick_images(draft_path, n: int) -> tuple[list[Path], list[Path]]:
             picks.append(pool[i % len(pool)])
             i += 1
             steps += 1
-        _save_rot(i)
+        if advance:
+            _save_rot(i)
 
     return picks[:n], used_inbox
 
