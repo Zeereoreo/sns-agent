@@ -19,7 +19,7 @@ import json
 import os
 import re
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -122,6 +122,21 @@ def _rank_of(page, keyword: str, blog: str) -> tuple[int | None, int]:
     return rank, len(order)
 
 
+def _session_ok(page, blog: str) -> bool | None:
+    """write 페이지가 로그인으로 튕기지 않으면 세션 유효. 판단 불가 시 None."""
+    try:
+        page.goto(f"https://blog.naver.com/{blog}/postwrite", timeout=30000)
+        page.wait_for_timeout(2500)
+        url = page.url
+    except Exception:
+        return None
+    if "nidlogin" in url or "nid.naver.com" in url:
+        return False
+    if "postwrite" in url or f"/{blog}" in url:
+        return True
+    return None
+
+
 def collect(force_ranks: bool = False) -> dict:
     from playwright.sync_api import sync_playwright  # noqa: PLC0415
     from publish.browser import launch_context  # noqa: PLC0415
@@ -162,6 +177,12 @@ def collect(force_ranks: bool = False) -> dict:
                 data.setdefault("ranks", {})[today] = ranks
             else:
                 print(f"[순위] 전건 수집 실패({failures}) — 오늘 순위 기록 보류.")
+
+            # 세션 사전 점검(하루 1회) — 만료를 발행 실패 전에 감지
+            so = _session_ok(page, blog)
+            if so is not None:
+                data["session"] = {"ok": so, "checked": f"{today} {datetime.now():%H:%M}"}
+                print(f"[세션] {'정상' if so else '만료 — 재로그인 필요'}")
         elif not need_ranks:
             print("[순위] 오늘 이미 수집됨(건너뜀). 강제: --ranks")
 

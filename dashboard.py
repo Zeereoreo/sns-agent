@@ -455,6 +455,10 @@ def _alerts_html(d) -> str:
     if blocked:
         alerts.append("배터리 전원에서 실행이 차단된 작업이 있습니다 — 노트북이 충전기에 꽂혀있지 "
                       f"않으면 발행되지 않습니다: <b>{e(', '.join(blocked))}</b>")
+    sv = _load_json(ROOT / "data" / "metrics.json", {}).get("session")
+    if sv and sv.get("ok") is False:
+        alerts.append("<b>네이버 세션이 만료됐습니다</b> — 자동 발행이 실패합니다. 터미널에서 "
+                      "<code>.venv\\Scripts\\python.exe -m publish.naver login</code> 실행 후 재로그인하세요.")
     if d.get("last_fail"):
         f = d["last_fail"]
         rtext, _ = _reason(f.get("reason"))
@@ -647,13 +651,24 @@ def page_seo(d) -> str:
             + f"<th>보강 후보 단어</th></tr>{comp}</table>")
 
 
+def _session_view(d):
+    return _load_json(ROOT / "data" / "metrics.json", {}).get("session")
+
+
 def page_ops(d) -> str:
     e = html.escape
     last_ok = next((x for x in d["log"] if x.get("ok") and not x.get("dry")), None)
     sess = (f"마지막 발행 성공: {e(str(last_ok.get('date')))} {e(str(last_ok.get('time','')))}"
             if last_ok else "아직 성공 발행 없음")
+    sv = _session_view(d)
+    if sv:
+        badge = ("<span class='badge ok'>세션 정상</span>" if sv.get("ok")
+                 else "<span class='badge bad'>세션 만료 — 재로그인 필요</span>")
+        sess_line = f"{badge} <span class='muted'>({e(str(sv.get('checked','')))} 점검)</span><br>"
+    else:
+        sess_line = "<span class='muted'>세션 점검 데이터 없음(다음 수집 시 생성)</span><br>"
     health = (f"<div class='panel'><div class='ptit'>세션·상태</div>"
-              f"<div>{sess}</div>"
+              f"<div>{sess_line}{sess}</div>"
               f"<div class='muted' style='margin-top:4px'>세션 만료 시: "
               f"<code>.venv\\Scripts\\python.exe -m publish.naver login</code></div></div>")
     return (_alerts_html(d)
