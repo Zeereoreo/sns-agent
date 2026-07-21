@@ -215,7 +215,8 @@ def collect() -> dict:
                 sc = {"score": sr["score"], "grade": sr["grade"],
                       "weak": [c["name"] for c in sr["checks"] if c["pts"] < c["max"] * 0.5]}
                 if is_next:
-                    next_seo = {"file": p.name, "title": title, **sc}
+                    next_seo = {"file": p.name, "title": title,
+                                "competitor": sr.get("competitor"), **sc}
                 if not done and sr["grade"] in ("C", "D"):
                     weak_drafts.append({"file": p.name, "score": sr["score"], "grade": sr["grade"]})
             except Exception:
@@ -462,9 +463,20 @@ def render(d: dict, shot_base: str = "/shot/") -> str:
         weak = ("<div class='muted' style='margin-top:6px'>보강 포인트: "
                 + ", ".join(_SEO_LABEL.get(w, w) for w in ns["weak"]) + "</div>") if ns.get("weak") else \
                "<div class='muted' style='margin-top:6px'>모든 항목 통과</div>"
+        ci = ns.get("competitor")
+        comp_html = ""
+        if ci:
+            lg = ci.get("length_gap")
+            lentxt = ""
+            if ci.get("length_benchmark"):
+                lentxt = (f"경쟁 글 길이 중앙값 {ci['length_benchmark']}자"
+                          + (f" · 우리가 {abs(lg)}자 {'짧음 → 보강 권장' if lg and lg > 0 else '김'}"
+                             if lg else ""))
+            miss = (" · 보강 후보: " + ", ".join(ci["missing_terms"])) if ci.get("missing_terms") else ""
+            comp_html = f"<div class='muted' style='margin-top:6px'>경쟁 분석: {e(lentxt)}{e(miss)}</div>"
         next_seo_html = (f"<div class='panel'><div class='ptit'>다음 발행글 SEO 점검</div>"
                          f"<div><span class='badge {gcls}'>{ns['grade']} {ns['score']}점</span> "
-                         f"&nbsp;{e(ns['title'])}</div>{weak}</div>")
+                         f"&nbsp;{e(ns['title'])}</div>{weak}{comp_html}</div>")
     else:
         next_seo_html = ""
     effect_html = f"""

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import date, datetime
 from itertools import zip_longest
@@ -145,6 +146,20 @@ def run(dry_run: bool = True) -> None:
             metrics.collect()
         except Exception as e:
             print("지표 수집 건너뜀:", e)
+
+        # 다음 발행 예정글의 경쟁 분석을 미리 준비(없을 때만). 실패해도 무시.
+        try:
+            import research  # noqa: PLC0415
+            nx = research._next_draft()
+            slug = None
+            if nx:
+                kw, _ = research._kw_from(nx)
+                slug = re.sub(r"[^가-힣a-zA-Z0-9]+", "_", kw)[:40]
+            if slug and not (ROOT / "data" / "research" / f"{slug}.json").exists():
+                research.save(research.analyze(nx))
+                print(f"[경쟁분석] 다음 글 '{kw}' 준비 완료")
+        except Exception as e:
+            print("경쟁 분석 건너뜀:", e)
 
 
 def status() -> None:

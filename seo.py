@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -120,7 +121,29 @@ def score_draft(path: Path) -> dict:
     grade = "A" if score >= 85 else "B" if score >= 70 else "C" if score >= 55 else "D"
     return {"file": path.name, "title": title, "keyword": kw,
             "score": score, "grade": grade, "checks": checks,
-            "body_len": body_len, "n_img": n_img}
+            "body_len": body_len, "n_img": n_img,
+            "competitor": _competitor_intel(kw, body + " " + title, body_len)}
+
+
+def _competitor_intel(kw: str, our_text: str, our_len: int) -> dict | None:
+    """data/research/<kw>.json 이 있으면 경쟁 대비 자문(점수엔 반영 안 함)."""
+    slug = re.sub(r"[^가-힣a-zA-Z0-9]+", "_", kw)[:40]
+    f = ROOT / "data" / "research" / f"{slug}.json"
+    if not f.exists():
+        return None
+    try:
+        r = json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    # research 가 뽑은 보강후보 중, 지금 우리 글에 아직 없는 것만
+    missing = [w for w in r.get("gap_terms", []) if w not in our_text]
+    bench = r.get("length_benchmark")
+    return {
+        "length_benchmark": bench,
+        "length_gap": (bench - our_len) if bench else None,   # +면 경쟁이 더 김
+        "missing_terms": missing[:8],
+        "competitors": len(r.get("competitors", [])),
+    }
 
 
 def _ordered():
@@ -149,6 +172,13 @@ def check_one(name: str) -> None:
     for c in r["checks"]:
         mark = "OK" if c["pts"] >= c["max"] * 0.99 else ("~ " if c["pts"] > 0 else "X ")
         print(f"  [{mark}] {c['name']:10} {c['pts']:>4}/{c['max']:<3} {c['detail']}")
+    ci = r.get("competitor")
+    if ci:
+        print(f"  [경쟁] 상위 {ci['competitors']}편 / 길이 중앙값 {ci['length_benchmark']}자"
+              + (f" (우리가 {abs(ci['length_gap'])}자 {'짧음' if ci['length_gap'] > 0 else '김'})"
+                 if ci.get("length_gap") else ""))
+        if ci["missing_terms"]:
+            print(f"         보강 후보: {', '.join(ci['missing_terms'])}")
 
 
 def main() -> None:
