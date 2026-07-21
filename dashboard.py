@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import re
 import socket
 import subprocess
 import sys
@@ -19,7 +20,7 @@ import webbrowser
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
@@ -94,6 +95,31 @@ def _load_json(path: Path, default):
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return default
+
+
+def _parse_multipart(body: bytes, boundary: str):
+    """최소 multipart/form-data 파서 (Python 3.13+ 에서 cgi 모듈 제거됨).
+    반환: (fields: {name: str}, files: [(filename, bytes), ...])"""
+    sep = b"--" + boundary.encode()
+    fields, files = {}, []
+    for part in body.split(sep):
+        if not part or part in (b"--\r\n", b"--", b"\r\n"):
+            continue
+        if b"\r\n\r\n" not in part:
+            continue
+        raw_head, data = part.split(b"\r\n\r\n", 1)
+        data = data[:-2] if data.endswith(b"\r\n") else data   # 끝 CRLF 제거
+        head = raw_head.decode("utf-8", "replace")
+        disp = next((ln for ln in head.splitlines() if "content-disposition" in ln.lower()), "")
+        m_name = re.search(r'name="([^"]*)"', disp)
+        m_file = re.search(r'filename="([^"]*)"', disp)
+        if not m_name:
+            continue
+        if m_file and m_file.group(1):
+            files.append((m_file.group(1), data))
+        else:
+            fields[m_name.group(1)] = data.decode("utf-8", "replace").strip()
+    return fields, files
 
 
 def _norm_code(v) -> str:
@@ -313,6 +339,17 @@ tr:hover td{background:#151920}
 .preview h4{margin:16px 0 6px;font-size:14px;color:#e6e8eb}
 .preview p{margin:6px 0;color:#c4ccd6}
 .imgslot{margin:10px 0;padding:10px 12px;border:1px dashed #333b49;border-radius:8px;color:#8b93a1;font-size:12.5px}
+.phgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin:8px 0 4px}
+.ph{margin:0}
+.ph img{width:100%;height:110px;object-fit:cover;border:1px solid #232833;border-radius:8px;display:block;background:#0b0d11}
+.ph figcaption{color:#6b7280;font-size:10.5px;margin-top:4px;word-break:break-all;line-height:1.3}
+.seg{font-size:13px;color:#8b93a1;margin:16px 0 4px}
+.upbox{background:#141821;border:1px solid #2a3550;border-radius:10px;padding:16px 18px;margin:14px 0}
+.upbox .ptit{color:#7cc4ff;font-size:13px;margin-bottom:10px;font-weight:600}
+.upbox select,.upbox input[type=file]{margin:6px 10px 6px 0;color:#e6e8eb;background:#0f1115;border:1px solid #333b49;border-radius:6px;padding:6px 8px;font:inherit;font-size:12.5px}
+.upbox button{background:#1d3a5f;color:#cfe4ff;border:1px solid #2a4d78;border-radius:7px;padding:7px 16px;font:inherit;font-size:13px;cursor:pointer}
+.upbox button:hover{background:#264a75}
+.okbar{background:#12331f;border:1px solid #245536;color:#5ddb8f;padding:11px 14px;border-radius:10px;margin-bottom:18px}
 """
 
 STATUS_BADGE = {"done": ("발행됨", "ok"), "next": ("다음 차례", "next"), "wait": ("대기", "mut")}
@@ -379,7 +416,7 @@ def _rank_badge(rank, delta) -> str:
 
 
 NAV = [("/", "개요"), ("/analytics", "성과"), ("/posts", "발행"),
-       ("/seo", "콘텐츠·SEO"), ("/ops", "상태")]
+       ("/seo", "콘텐츠·SEO"), ("/images", "이미지"), ("/ops", "상태")]
 
 
 def _log_tail(n: int = 40) -> str:
@@ -622,6 +659,71 @@ def page_ops(d) -> str:
             + "<h2>실행 로그 (최근)</h2><pre class='logbox'>" + e(_log_tail(40)) + "</pre>")
 
 
+_SEG_NAME = {"a": "방송 피켓", "b": "클럽·버킷", "c": "간판"}
+
+
+def _photo_grid(files, base="/photo/") -> str:
+    e = html.escape
+    if not files:
+        return "<p class='muted'>없음</p>"
+    cells = "".join(
+        f"<figure class='ph'><img src='{base}{e(f.name)}' loading='lazy' alt='{e(f.name)}'>"
+        f"<figcaption>{e(f.name)}</figcaption></figure>" for f in files)
+    return f"<div class='phgrid'>{cells}</div>"
+
+
+def page_images(d) -> str:
+    e = html.escape
+    pool = [p for p in imgmod._imgs(imgmod.PHOTO_DIR) if p.parent == imgmod.PHOTO_DIR]
+    inbox = imgmod._imgs(imgmod.INBOX_DIR)
+    infos = [p for p in imgmod._imgs(imgmod.IMG_DIR)]
+    by_seg = {"a": [], "b": [], "c": [], "?": []}
+    for p in pool:
+        by_seg.get(p.name[0] if p.name[:1] in "abc" else "?", by_seg["?"]).append(p)
+
+    guide = f"""
+<div class="panel"><div class="ptit">새 사진 추가하는 법</div>
+<ol style="margin:6px 0 0;padding-left:20px;line-height:1.9">
+<li><b>여기서 바로 업로드</b> — 아래 업로드 박스에 사진을 끌어다 놓거나 선택하세요.
+    세그먼트를 고르면 파일명 앞에 <code>a_/b_/c_</code>가 붙어 해당 주제 글에만 쓰입니다.</li>
+<li>업로드한 사진은 <b>인박스</b>로 들어가 <b>다음 발행 글에 우선</b> 사용되고, 쓰인 뒤 보관됩니다.</li>
+<li>폴더로 직접 넣어도 됩니다 — 우선순위 사진: <code>drafts/photos/inbox/</code>,
+    평소 재활용 풀: <code>drafts/photos/</code></li>
+</ol>
+<div class="muted" style="margin-top:8px">세그먼트: a=방송 피켓 · b=클럽/버킷 · c=간판. 원본 실물 사진만(AI 생성 제품컷 금지).</div>
+</div>
+
+<form class="upbox" method="POST" action="/upload" enctype="multipart/form-data">
+  <div class="ptit">사진 업로드 → 인박스(다음 글 우선 사용)</div>
+  <label>세그먼트(주제):
+    <select name="segment">
+      <option value="">자동(파일명 유지)</option>
+      <option value="a">a · 방송 피켓</option>
+      <option value="b">b · 클럽·버킷</option>
+      <option value="c">c · 간판</option>
+    </select>
+  </label>
+  <input type="file" name="file" accept="image/*" multiple required>
+  <button type="submit">업로드</button>
+  <div class="muted" style="margin-top:6px">여러 장 선택 가능. 업로드 후 이 페이지로 돌아옵니다.</div>
+</form>"""
+
+    inbox_html = (f"<h2>인박스 — 다음 글에 우선 사용 ({len(inbox)}장)</h2>"
+                  + _photo_grid(inbox, "/photo/"))
+    seg_html = ""
+    for s in ("a", "b", "c", "?"):
+        fs = by_seg[s]
+        if not fs:
+            continue
+        seg_html += f"<h3 class='seg'>{_SEG_NAME.get(s, '미분류')} · {len(fs)}장</h3>" + _photo_grid(fs)
+    info_html = ("<h2>강조 인포그래픽 (자동 생성, 글마다 1장)</h2>"
+                 + _photo_grid(infos, "/photo/"))
+    return (guide
+            + inbox_html
+            + f"<h2>사진 풀 — 순환 재활용 ({len(pool)}장)</h2>" + seg_html
+            + info_html)
+
+
 def page_post_detail(d, fname: str) -> str:
     e = html.escape
     fname = Path(fname).name
@@ -665,6 +767,7 @@ PAGES = {
     "/analytics": ("성과", page_analytics),
     "/posts": ("발행", page_posts),
     "/seo": ("콘텐츠·SEO", page_seo),
+    "/images": ("이미지", page_images),
     "/ops": ("상태", page_ops),
 }
 
@@ -700,7 +803,14 @@ def render(d: dict, shot_base: str = "/shot/", page: str = "/", query: dict | No
         body = page_post_detail(d, fname)
         return layout("/posts", body, live, d["stamp"], title="글 미리보기")
     label, fn = PAGES.get(page, PAGES["/"])
-    return layout(page if page in PAGES else "/", fn(d), live, d["stamp"], title=label)
+    body = fn(d)
+    if page == "/images" and query:
+        if query.get("ok"):
+            body = (f"<div class='okbar'>✅ 사진 {html.escape(query['ok'])}장을 인박스에 올렸습니다 "
+                    "— 다음 발행 글부터 우선 사용됩니다.</div>") + body
+        elif query.get("err"):
+            body = "<div class='alert'>업로드 실패 — 이미지 파일인지 확인하세요.</div>" + body
+    return layout(page if page in PAGES else "/", body, live, d["stamp"], title=label)
 
 
 _cache = {"t": 0.0, "data": None}
@@ -730,6 +840,17 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.send_error(404)
             return
+        if self.path.startswith("/photo/"):
+            name = Path(unquote(urlparse(self.path).path[len("/photo/"):])).name
+            # 사진 풀 / 인박스 / 인포그래픽 중 존재하는 곳에서 서빙(경로 이탈 방지)
+            for base in (imgmod.PHOTO_DIR, imgmod.INBOX_DIR, imgmod.IMG_DIR):
+                f = base / name
+                if f.is_file() and f.suffix.lower() in (".png", ".jpg", ".jpeg"):
+                    ct = "image/png" if f.suffix.lower() == ".png" else "image/jpeg"
+                    self._send(f.read_bytes(), ct)
+                    return
+            self.send_error(404)
+            return
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         if path == "/api":
@@ -749,7 +870,49 @@ class Handler(BaseHTTPRequestHandler):
             # 핸들러 안에서 shutdown() 하면 교착되므로 별도 스레드에서 종료한다.
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
+        if self.path == "/upload":
+            self._handle_upload()
+            return
         self.send_error(404)
+
+    def _handle_upload(self):
+        ctype = self.headers.get("Content-Type", "")
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if "multipart/form-data" not in ctype or length <= 0 or length > 60_000_000:
+            self._redirect("/images?err=bad")
+            return
+        boundary = ctype.split("boundary=", 1)[-1].strip().strip('"')
+        body = self.rfile.read(length)
+        try:
+            fields, files = _parse_multipart(body, boundary)
+        except Exception:
+            self._redirect("/images?err=parse")
+            return
+        seg = (fields.get("segment") or "").strip().lower()
+        seg = seg if seg in ("a", "b", "c") else ""
+        imgmod.INBOX_DIR.mkdir(parents=True, exist_ok=True)
+        saved = 0
+        for filename, data in files:
+            ext = Path(filename).suffix.lower()
+            if ext not in (".png", ".jpg", ".jpeg") or len(data) < 1000:
+                continue
+            stem = Path(filename).name
+            if seg and not stem[:2] == f"{seg}_":
+                stem = f"{seg}_{stem}"
+            dest = imgmod.INBOX_DIR / stem
+            i = 1
+            while dest.exists():   # 이름 충돌 회피
+                dest = imgmod.INBOX_DIR / f"{Path(stem).stem}_{i}{ext}"
+                i += 1
+            dest.write_bytes(data)
+            saved += 1
+        _cache["data"] = None      # 캐시 무효화(업로드 즉시 반영)
+        self._redirect(f"/images?ok={saved}")
+
+    def _redirect(self, to: str):
+        self.send_response(303)
+        self.send_header("Location", to)
+        self.end_headers()
 
     def _send(self, body: bytes, ctype: str) -> None:
         self.send_response(200)
