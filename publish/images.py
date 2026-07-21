@@ -23,11 +23,14 @@ USED_DIR = PHOTO_DIR / "used"
 DATA_DIR = ROOT / "data"
 ROT_FILE = DATA_DIR / "photo_rotation.json"
 
-# 초안 코드 -> 대표 인포그래픽 파일명
+# 초안 코드 -> 대표 인포그래픽 파일명 (주제가 명확히 맞는 것만; 나머지는 세그먼트 기본)
 INFOGRAPHIC_MAP = {
     "a02": "price-factors.png",
     "a03": "nickname-checklist.png",
     "a06": "platform-compare.png",
+    "a08": "nickname-checklist.png",   # 크루 닉네임 → 닉네임 체크리스트
+    "a11": "platform-compare.png",     # 쇼츠/틱톡 → 플랫폼 비교
+    "c30": "process-flow.png",         # 간판 제작 과정 → 공정 플로우
 }
 # 세그먼트 기본 인포그래픽(주제 매칭 없을 때)
 SEGMENT_DEFAULT = {"a": "process-flow.png", "b": "bucket-compare.png", "c": "sign-compare.png"}
@@ -107,6 +110,16 @@ def pick_images(draft_path, n: int, advance: bool = True) -> tuple[list[Path], l
             steps += 1
         if advance:
             _save_rot(i)
+
+    # 썸네일 다양화: 세그먼트마다 같은 인포그래픽이 대표(첫 장)로 반복되는 것을 막는다.
+    # 초안별 결정론적으로 '사진 우선'인 글은 실물 사진을 첫 장으로 올리고 인포그래픽은
+    # 둘째 장으로 내린다(인포그래픽은 본문에 유지). 슬롯 2개 이상 + 첫 장이 인포그래픽 +
+    # 둘째가 실물 사진일 때만.
+    if n >= 2 and len(picks) >= 2 and picks[0].parent == IMG_DIR \
+            and picks[1].parent != IMG_DIR:
+        name = Path(draft_path).name
+        if sum(ord(c) for c in name) % 2 == 1:   # 안정 해시(약 절반)
+            picks[0], picks[1] = picks[1], picks[0]
 
     return picks[:n], used_inbox
 
