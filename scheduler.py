@@ -88,6 +88,20 @@ def run(dry_run: bool = True) -> None:
 
     n = _image_slots(nxt)
     picks, used_inbox = imgmod.pick_images(nxt, n)
+
+    # 발행 전 SEO 게이트: 매 글을 점검해 품질을 추적한다(점수 낮으면 경고).
+    seo_score = seo_grade = None
+    try:
+        import seo  # noqa: PLC0415
+        sr = seo.score_draft(nxt)
+        seo_score, seo_grade = sr["score"], sr["grade"]
+        weak = [c["name"] for c in sr["checks"] if c["pts"] < c["max"] * 0.5]
+        print(f"[SEO] {seo_grade} {seo_score}점" + (f" (약점: {', '.join(weak)})" if weak else ""))
+        if seo_score < 70:
+            print("  ⚠ SEO 점수 낮음 — 발행은 하되 개선 권장.")
+    except Exception as e:
+        print("[SEO] 점검 건너뜀:", e)
+
     print(f"[스케줄러] 대상: {nxt.name} | 이미지 {len(picks)}장 | dry_run={dry_run}")
 
     from publish import naver  # noqa: PLC0415 (playwright 지연 임포트)
@@ -112,6 +126,7 @@ def run(dry_run: bool = True) -> None:
                      "draft": nxt.name, "ok": ok, "dry": dry_run,
                      "images": res.get("images_inserted", 0),
                      "planned_images": len(picks),
+                     "seo_score": seo_score, "seo_grade": seo_grade,
                      "reason": reason, "url": res.get("url")})
     _save_state(s)
     if ok:

@@ -55,7 +55,12 @@ def parse_draft(path: str | Path) -> dict:
         line = raw.strip()
         if not line:
             continue
-        if line.startswith("# "):            # H1(제목) 은 본문에서 제외
+        if line.startswith("# ") and not line.startswith("## "):  # H1(제목) 은 본문에서 제외
+            continue
+        # 소제목(## …) 은 해시태그 필터보다 먼저 처리한다.
+        # (^#\S 필터가 '## 소제목'을 해시태그로 오인해 통째로 버리던 버그)
+        if line.startswith("## "):
+            blocks.append({"kind": "heading", "text": _clean_inline(line.lstrip("# ").strip())})
             continue
         if re.match(r"^#\S", line) or (line.startswith("#") and " #" in line):
             continue                          # 해시태그 줄 제외
@@ -63,9 +68,6 @@ def parse_draft(path: str | Path) -> dict:
         if line.startswith("[이미지"):
             alt = img.group(1) if img and img.group(1) else ""
             blocks.append({"kind": "image", "alt": alt})
-            continue
-        if line.startswith("##"):
-            blocks.append({"kind": "heading", "text": _clean_inline(line.lstrip("# ").strip())})
             continue
         blocks.append({"kind": "text", "text": _clean_inline(line)})
 

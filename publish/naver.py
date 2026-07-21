@@ -224,6 +224,14 @@ def publish(draft_path: str, image_dir: str | None = None,
                             page.keyboard.press("Enter")
                             _pause(0.2, 0.5)
                     continue
+                if blk["kind"] == "heading":
+                    # 소제목은 굵게(가독성 + 강조 신호). Ctrl+B 토글로 감싼다.
+                    page.keyboard.press("Control+B")
+                    page.keyboard.type(blk["text"], delay=random.randint(15, 45))
+                    page.keyboard.press("Control+B")
+                    page.keyboard.press("Enter")
+                    _pause(0.2, 0.5)
+                    continue
                 page.keyboard.type(blk["text"], delay=random.randint(15, 45))
                 page.keyboard.press("Enter")
                 page.keyboard.press("Enter")

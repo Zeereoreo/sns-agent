@@ -190,8 +190,15 @@ def collect() -> dict:
     published = set(state["published"])
     today = str(date.today())
 
+    try:
+        import seo as seomod
+    except Exception:
+        seomod = None
+
     queue = []
     nxt_marked = False
+    next_seo = None
+    weak_drafts = []
     for i, p in enumerate(drafts, 1):
         done = p.name in published
         is_next = not done and not nxt_marked
@@ -201,7 +208,19 @@ def collect() -> dict:
             title = parse_draft(p)["title"]
         except Exception:
             title = "(파싱 실패)"
-        queue.append({"i": i, "name": p.name, "title": title,
+        sc = None
+        if seomod is not None:
+            try:
+                sr = seomod.score_draft(p)
+                sc = {"score": sr["score"], "grade": sr["grade"],
+                      "weak": [c["name"] for c in sr["checks"] if c["pts"] < c["max"] * 0.5]}
+                if is_next:
+                    next_seo = {"file": p.name, "title": title, **sc}
+                if not done and sr["grade"] in ("C", "D"):
+                    weak_drafts.append({"file": p.name, "score": sr["score"], "grade": sr["grade"]})
+            except Exception:
+                pass
+        queue.append({"i": i, "name": p.name, "title": title, "seo": sc,
                       "status": "done" if done else ("next" if is_next else "wait")})
 
     infographics = imgmod._imgs(imgmod.IMG_DIR)
@@ -222,6 +241,8 @@ def collect() -> dict:
         "stamp": f"{datetime.now():%Y-%m-%d %H:%M}",
         "days_left": remaining // per_day,
         "last_fail": last_fail,
+        "next_seo": next_seo,
+        "weak_drafts": weak_drafts,
         "metrics": _metrics_view(),
         "blog": config.NAVER_BLOG_ID or "(미설정)",
         "max_per_day": config.MAX_POSTS_PER_DAY,
@@ -282,6 +303,12 @@ tr:hover td{background:#151920}
 """
 
 STATUS_BADGE = {"done": ("발행됨", "ok"), "next": ("다음 차례", "next"), "wait": ("대기", "mut")}
+
+_SEO_LABEL = {
+    "title_kw": "제목 키워드", "title_len": "제목 길이", "intro_kw": "도입부 키워드",
+    "body_len": "본문 분량", "headings": "소제목", "faq": "FAQ", "images": "이미지 수",
+    "captions": "캡션", "tags": "태그 수", "tag_kw": "태그 키워드",
+}
 
 # scheduler 가 기록한 실패 사유 → 사람이 읽는 설명(+조치)
 REASON_TEXT = {
@@ -363,6 +390,9 @@ def render(d: dict, shot_base: str = "/shot/") -> str:
     if d["images"]["pool"] == 0 and d["images"]["inbox"] == 0:
         alerts.append("실물 사진 풀이 비어 있습니다 — 글마다 인포그래픽 1장만 삽입됩니다. "
                       "<code>drafts/photos/</code>에 사진을 넣으면 자동으로 섞여 들어갑니다.")
+    for w in d.get("weak_drafts", []):
+        alerts.append(f"SEO 점수 낮은 대기글: <b>{e(w['file'])}</b> ({w['grade']} {w['score']}점) — "
+                      "발행 전 제목·본문·키워드 보강 권장")
     alert_html = "".join(f'<div class="alert">{a}</div>' for a in alerts)
 
     cards = f"""
@@ -394,14 +424,20 @@ def render(d: dict, shot_base: str = "/shot/") -> str:
             img = f"<span class='badge warn'>{x.get('images',0)}/{planned}장</span>"
         title = f"<a href='{e(str(x['url']))}' target='_blank'>{e(str(x.get('draft','-')))}</a>" \
             if x.get("url") else e(str(x.get("draft", "-")))
+        sg = x.get("seo_grade")
+        if sg:
+            gcls = {"A": "ok", "B": "next", "C": "warn", "D": "bad"}.get(sg, "mut")
+            seo_cell = f"<span class='badge {gcls}'>{sg} {x.get('seo_score')}</span>"
+        else:
+            seo_cell = "-"
         lrows += (f"<tr><td>{e(str(x.get('date','-')))} {e(str(x.get('time','')))}</td>"
                   f"<td>{title}</td>"
-                  f"<td>{'dry-run' if x.get('dry') else '실제'}</td><td>{img}</td>"
+                  f"<td>{'dry-run' if x.get('dry') else '실제'}</td><td>{img}</td><td>{seo_cell}</td>"
                   f"<td><span class='badge {'ok' if x.get('ok') else 'mut'}'>"
                   f"{'성공' if x.get('ok') else '미발행'}</span>"
                   + (f" <span class='badge {rcls}'>{e(rtext)}</span>" if rtext else "")
                   + "</td></tr>")
-    lrows = lrows or "<tr><td colspan=5>기록 없음</td></tr>"
+    lrows = lrows or "<tr><td colspan=6>기록 없음</td></tr>"
 
     shots = "".join(
         f'<figure><img src="{shot_base}{e(s)}" alt="{e(s)}"><figcaption>{e(s)}</figcaption></figure>'
@@ -419,6 +455,18 @@ def render(d: dict, shot_base: str = "/shot/") -> str:
     cum = m.get("cum_total")
     p1 = m.get("kw_on_page1", 0)
     tracked = m.get("kw_tracked", 0)
+
+    ns = d.get("next_seo")
+    if ns:
+        gcls = {"A": "ok", "B": "next", "C": "warn", "D": "bad"}.get(ns["grade"], "mut")
+        weak = ("<div class='muted' style='margin-top:6px'>보강 포인트: "
+                + ", ".join(_SEO_LABEL.get(w, w) for w in ns["weak"]) + "</div>") if ns.get("weak") else \
+               "<div class='muted' style='margin-top:6px'>모든 항목 통과</div>"
+        next_seo_html = (f"<div class='panel'><div class='ptit'>다음 발행글 SEO 점검</div>"
+                         f"<div><span class='badge {gcls}'>{ns['grade']} {ns['score']}점</span> "
+                         f"&nbsp;{e(ns['title'])}</div>{weak}</div>")
+    else:
+        next_seo_html = ""
     effect_html = f"""
 <h2>효과 측정 — 방문자 추이</h2>
 <div class="cards">
@@ -428,6 +476,7 @@ def render(d: dict, shot_base: str = "/shot/") -> str:
 </div>
 <div class="panel"><div class="ptit">일별 누적 방문자</div>{total_bars}</div>
 <div class="panel"><div class="ptit">일별 신규 방문자(누적 증가분)</div>{new_bars}</div>
+{next_seo_html}
 <h2>효과 측정 — 타깃 키워드 검색 순위 (네이버 블로그탭){f" · {e(m['rank_date'])} 기준" if m.get('rank_date') else ""}</h2>
 <table><tr><th>타깃 검색어</th><th>우리 글 순위 (전일 대비)</th></tr>{krows}</table>
 <p class="muted">순위는 발행 후 자동 색인·수집됩니다. 검색량(월간 검색수)은 네이버 검색광고 API 키가 있으면 추가할 수 있습니다.</p>"""
@@ -455,7 +504,7 @@ def render(d: dict, shot_base: str = "/shot/") -> str:
 <h2>발행 큐 ({d['done']}/{d['total']})</h2>
 <div class="scroll"><table><tr><th>#</th><th>상태</th><th>파일</th><th>제목</th></tr>{qrows}</table></div>
 <h2>최근 발행 기록</h2>
-<table><tr><th>날짜</th><th>초안</th><th>모드</th><th>이미지</th><th>결과</th></tr>{lrows}</table>
+<table><tr><th>날짜</th><th>초안</th><th>모드</th><th>이미지</th><th>SEO</th><th>결과</th></tr>{lrows}</table>
 <h2>마지막 실행 화면</h2>
 <div class="shots">{shots}</div>
 <div class="foot">scheduler.py 상태 파일: data/publish_state.json</div>
