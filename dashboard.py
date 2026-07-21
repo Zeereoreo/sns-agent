@@ -350,6 +350,10 @@ tr:hover td{background:#151920}
 .upbox button{background:#1d3a5f;color:#cfe4ff;border:1px solid #2a4d78;border-radius:7px;padding:7px 16px;font:inherit;font-size:13px;cursor:pointer}
 .upbox button:hover{background:#264a75}
 .okbar{background:#12331f;border:1px solid #245536;color:#5ddb8f;padding:11px 14px;border-radius:10px;margin-bottom:18px}
+.ta{width:100%;background:#0f1115;color:#e6e8eb;border:1px solid #333b49;border-radius:8px;padding:10px 12px;font:inherit;font-size:13px;resize:vertical}
+.panel button{background:#1d3a5f;color:#cfe4ff;border:1px solid #2a4d78;border-radius:7px;padding:7px 18px;font:inherit;font-size:13px;cursor:pointer;margin-right:10px}
+.panel button:hover{background:#264a75}
+.emph{background:#141a14;border:1px solid #2a4d2f;border-radius:8px;padding:10px 12px;margin:10px 0;color:#8fd6a0;font-size:13px}
 """
 
 STATUS_BADGE = {"done": ("발행됨", "ok"), "next": ("다음 차례", "next"), "wait": ("대기", "mut")}
@@ -416,7 +420,7 @@ def _rank_badge(rank, delta) -> str:
 
 
 NAV = [("/", "개요"), ("/analytics", "성과"), ("/posts", "발행"),
-       ("/seo", "콘텐츠·SEO"), ("/images", "이미지"), ("/ops", "상태")]
+       ("/seo", "콘텐츠·SEO"), ("/images", "이미지"), ("/settings", "설정"), ("/ops", "상태")]
 
 
 def _log_tail(n: int = 40) -> str:
@@ -659,6 +663,31 @@ def page_ops(d) -> str:
             + "<h2>실행 로그 (최근)</h2><pre class='logbox'>" + e(_log_tail(40)) + "</pre>")
 
 
+def page_settings(d) -> str:
+    e = html.escape
+    pts = config.load_emphasis()
+    txt = "\n".join(pts)
+    times = "09:07 / 13:23 / 18:41 (± 0~9분 랜덤)"
+    return f"""
+<div class="panel"><div class="ptit">주요 강조 포인트</div>
+<p class="muted" style="margin:0 0 8px">모든 글의 맺음말(연락처) 바로 위에 <b>✅ 굵은 줄</b>로 들어갑니다.
+한 줄에 하나씩. 우리 사업의 핵심 셀링포인트를 적으세요(예: 당일 상담·견적 / 전국 제작·배송 / 10년 노하우). 최대 6개.</p>
+<form method="POST" action="/save-emphasis">
+  <textarea name="points" rows="7" class="ta" placeholder="당일 상담·견적 가능&#10;전국 제작·배송&#10;맞춤 디자인 무료 시안">{e(txt)}</textarea>
+  <div style="margin-top:10px"><button type="submit">저장</button>
+  <span class="muted">저장 즉시 다음 발행 글부터 반영됩니다.</span></div>
+</form>
+</div>
+<h2>현재 운영 설정 (참고)</h2>
+<table>
+<tr><th>항목</th><th>값</th><th>바꾸는 곳</th></tr>
+<tr><td>대상 블로그</td><td>{e(d['blog'])}</td><td class='muted'>.env NAVER_BLOG_ID</td></tr>
+<tr><td>하루 발행 수</td><td>{d['max_per_day']}편</td><td class='muted'>.env MAX_POSTS_PER_DAY</td></tr>
+<tr><td>발행 시각</td><td>{times}</td><td class='muted'>작업 스케줄러 SNS-Agent-1/2/3</td></tr>
+</table>
+<p class="muted">강조 포인트는 data/emphasis.json 에 저장됩니다. 비워두면 아무것도 삽입되지 않습니다.</p>"""
+
+
 _SEG_NAME = {"a": "방송 피켓", "b": "클럽·버킷", "c": "간판"}
 
 
@@ -739,6 +768,8 @@ def page_post_detail(d, fname: str) -> str:
         sr = seomod.score_draft(p)
     except Exception:
         sr = None
+    emphasis = config.load_emphasis()
+    emph_html = ("<div class='emph'>" + "<br>".join(f"✅ {e(p)}" for p in emphasis) + "</div>") if emphasis else ""
     body = ""
     for b in parsed["blocks"]:
         if b["kind"] == "heading":
@@ -746,7 +777,11 @@ def page_post_detail(d, fname: str) -> str:
         elif b["kind"] == "image":
             body += f"<div class='imgslot'>🖼 이미지 — {e(b.get('alt') or '(캡션 없음)')}</div>"
         else:
+            if b["text"].startswith("👉") and emph_html:
+                body += emph_html            # CTA 직전에 강조 포인트(발행 시와 동일 위치)
+                emph_html = ""
             body += f"<p>{e(b['text'])}</p>"
+    body += emph_html   # CTA 가 없던 경우 맨 끝에
     tags = " ".join(f"#{e(t)}" for t in parsed["tags"])
     seo_html = ""
     if sr:
@@ -768,6 +803,7 @@ PAGES = {
     "/posts": ("발행", page_posts),
     "/seo": ("콘텐츠·SEO", page_seo),
     "/images": ("이미지", page_images),
+    "/settings": ("설정", page_settings),
     "/ops": ("상태", page_ops),
 }
 
@@ -810,6 +846,11 @@ def render(d: dict, shot_base: str = "/shot/", page: str = "/", query: dict | No
                     "— 다음 발행 글부터 우선 사용됩니다.</div>") + body
         elif query.get("err"):
             body = "<div class='alert'>업로드 실패 — 이미지 파일인지 확인하세요.</div>" + body
+    if page == "/settings" and query:
+        if query.get("ok"):
+            body = "<div class='okbar'>✅ 강조 포인트를 저장했습니다 — 다음 발행 글부터 반영됩니다.</div>" + body
+        elif query.get("err"):
+            body = "<div class='alert'>저장 실패</div>" + body
     return layout(page if page in PAGES else "/", body, live, d["stamp"], title=label)
 
 
@@ -873,7 +914,22 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/upload":
             self._handle_upload()
             return
+        if self.path == "/save-emphasis":
+            self._handle_save_emphasis()
+            return
         self.send_error(404)
+
+    def _handle_save_emphasis(self):
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        body = self.rfile.read(length) if 0 < length < 100_000 else b""
+        form = {k: v[0] for k, v in parse_qs(body.decode("utf-8", "replace")).items()}
+        points = [ln.strip() for ln in form.get("points", "").splitlines() if ln.strip()]
+        try:
+            config.save_emphasis(points)
+            _cache["data"] = None
+            self._redirect("/settings?ok=1")
+        except Exception:
+            self._redirect("/settings?err=1")
 
     def _handle_upload(self):
         ctype = self.headers.get("Content-Type", "")

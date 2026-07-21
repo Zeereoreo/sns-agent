@@ -233,6 +233,8 @@ def publish(draft_path: str, image_dir: str | None = None,
             return result
 
         # 본문 입력
+        emphasis = config.load_emphasis()   # 운영자 지정 핵심 강조 포인트
+        emphasis_done = not emphasis
         try:
             page.locator(SEL["body"]).first.click()
             _pause()
@@ -259,6 +261,16 @@ def publish(draft_path: str, image_dir: str | None = None,
                     page.keyboard.press("Enter")
                     _pause(0.2, 0.5)
                     continue
+                # 강조 포인트: CTA(👉) 직전에 굵게 삽입
+                if not emphasis_done and blk["text"].startswith("👉"):
+                    for pt in emphasis:
+                        page.keyboard.press("Control+B")
+                        page.keyboard.type(f"✅ {pt}", delay=random.randint(15, 40))
+                        page.keyboard.press("Control+B")
+                        page.keyboard.press("Enter")
+                        _pause(0.15, 0.4)
+                    page.keyboard.press("Enter")
+                    emphasis_done = True
                 page.keyboard.type(blk["text"], delay=random.randint(15, 45))
                 page.keyboard.press("Enter")
                 page.keyboard.press("Enter")

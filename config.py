@@ -7,6 +7,7 @@ API 키 관리 방향:
 """
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -31,6 +32,26 @@ PUBLISH_WINDOW_END: str = os.environ.get("PUBLISH_WINDOW_END", "10:00")
 DATA_DIR = ROOT / "data"
 DRAFTS_DIR = ROOT / "drafts"
 STORAGE_STATE = ROOT / "storage_state.json"  # 네이버 로그인 세션
+
+# ----- 주요 강조 포인트 (운영자가 대시보드에서 편집) -----
+EMPHASIS_FILE = DATA_DIR / "emphasis.json"
+
+
+def load_emphasis() -> list[str]:
+    """글마다 삽입할 핵심 셀링포인트 목록. 없으면 빈 리스트."""
+    try:
+        d = json.loads(EMPHASIS_FILE.read_text(encoding="utf-8"))
+        return [s.strip() for s in d.get("points", []) if s and s.strip()][:6]
+    except Exception:
+        return []
+
+
+def save_emphasis(points: list[str]) -> None:
+    DATA_DIR.mkdir(exist_ok=True)
+    clean = [s.strip() for s in points if s and s.strip()][:6]
+    tmp = EMPHASIS_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"points": clean}, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, EMPHASIS_FILE)
 
 
 def require_api_key() -> str:
