@@ -102,6 +102,27 @@ def t_research():
     check("명사 유지: 로고 있음", "로고" in nn, nn)
 
 
+def t_growth():
+    section("growth 승산/기회 로직")
+    import growth
+    # _winnability: 미측정=1.0, 30위밖(None)/저순위=할인, 상위(≤10)=1.0
+    check("winnability 미측정=1.0", growth._winnability("없는키워드zzz", {}) == 1.0)
+    check("winnability 30위밖(None)=할인", growth._winnability("x", {"x": None}) < 1.0)
+    check("winnability 상위(≤10)=1.0", growth._winnability("x", {"x": 3}) == 1.0)
+    check("winnability 저순위(>10)=할인", growth._winnability("x", {"x": 25}) < 1.0)
+    # _research_opportunity: 리서치 없으면 0(기여 없음)
+    check("research 기회 없는 키워드=0", growth._research_opportunity("리서치없음zzz", SAMPLE) == 0.0)
+    check("demand_score 0~1", 0.0 <= growth._demand_score("아무거나", {}) <= 1.0)
+    # segment_scores: a/b/c 키 + 0~1
+    segs = growth.segment_scores()
+    check("segment_scores 키/범위", set(segs) == set("abc") and all(0 <= v <= 1 for v in segs.values()))
+    # rank_queue: 내림차순 정렬 + demand 0~1
+    q = growth.rank_queue()
+    check("rank_queue 비어있지 않음", len(q) > 0)
+    check("rank_queue 내림차순", all(q[i]["score"] >= q[i + 1]["score"] for i in range(len(q) - 1)))
+    check("rank_queue demand 0~1", all(0 <= r["breakdown"]["demand"] <= 1 for r in q))
+
+
 def t_dashboard():
     section("dashboard 유틸")
     import dashboard
@@ -113,7 +134,7 @@ def t_dashboard():
 
 
 def main():
-    for t in (t_parser, t_seo, t_images, t_metrics, t_research, t_dashboard):
+    for t in (t_parser, t_seo, t_images, t_metrics, t_research, t_growth, t_dashboard):
         try:
             t()
         except Exception:

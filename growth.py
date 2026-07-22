@@ -49,6 +49,7 @@ GLOG = ROOT / "data" / "growth_log.json"
 DEFAULT_WEIGHTS = {"demand": 0.35, "seg": 0.20, "seo": 0.20, "diversity": 0.15, "explore": 0.10}
 MAX_RANK = 30  # 이 순위 밖은 최하로 취급
 DEMAND_CACHE = ROOT / "data" / "demand_cache.json"
+RESEARCH_DIR = ROOT / "data" / "research"
 
 
 # ---------- 데이터 로드 ----------
@@ -199,6 +200,44 @@ def _demand_score(kw: str, dmap: dict) -> float:
     return min(1.0, n / 5.0)
 
 
+def _draft_body_len(path: Path) -> int | None:
+    """초안 본문 공백제외 글자수(research 벤치마크와 동일 기준). 실패 시 None."""
+    try:
+        d = parse_draft(path)
+        body = " ".join(b.get("text", "") for b in d["blocks"])
+        return len(re.sub(r"\s", "", body))
+    except Exception:
+        return None
+
+
+def _research_slug(kw: str) -> str:
+    return re.sub(r"[^가-힣a-zA-Z0-9]+", "_", kw)[:40] or "kw"
+
+
+def _research_opportunity(kw: str, path: Path) -> float:
+    """경쟁 리서치 기반 '승산 기회' 0~1. 신생 블로그가 이기는 길은 상위 경쟁글보다
+    '더 깊게' 쓰는 것 — 우리 글이 경쟁 길이 벤치마크보다 충분히 깊으면 이길 수 있는
+    신호다. 자동완성 수요가 낮아도 경쟁을 이길 수 있는 중간꼬리(예: 네일샵 간판 비용)를
+    엔진이 저평가하지 않게 한다.
+    리서치 없거나(모름) 우리가 경쟁보다 확실히 깊지 않으면 0(기여 없음 → 기존 demand 그대로).
+    research.py 의 제목필터는 의미적 온토픽까지는 못 재므로, '경쟁 대비 우리 깊이'라는
+    직접 측정 가능한 신호만 쓴다(정직).
+    """
+    rf = RESEARCH_DIR / f"{_research_slug(kw)}.json"
+    if not rf.exists():
+        return 0.0
+    bench = _load(rf, {}).get("length_benchmark")
+    if not bench:
+        return 0.0
+    our_len = _draft_body_len(path)
+    if our_len is None:
+        return 0.0
+    ratio = our_len / bench
+    if ratio < 1.2:            # 경쟁보다 확실히 깊지 않으면 기회로 안 침
+        return 0.0
+    return max(0.6, min(1.0, ratio / 1.8))   # 1.2배→0.67, 1.8배+→1.0
+
+
 def _winnability(kw: str, latest: dict) -> float:
     """승산 보정 0~1. 수요(자동완성)는 검색활동만 재고 '우리가 이길 수 있는지'는
     못 잰다. 그래서 우리 실측 순위를 승산 신호로 쓴다:
@@ -243,8 +282,10 @@ def rank_queue() -> list[dict]:
         kw = primary_keyword(p)
         seg_s = segs[seg]
         seo_s = _seo_score(p)
-        # 검색 수요 × 승산 보정(못 이긴다고 드러난 head 키워드는 깎임)
+        # 검색 수요 × 승산 보정(못 이긴다고 드러난 head 키워드는 깎임).
+        # 단, 리서치로 '경쟁보다 깊게 썼다'가 확인되면 저수요여도 기회 점수로 끌어올림.
         demand_s = _demand_score(kw, dmap) * _winnability(kw, latest)
+        demand_s = max(demand_s, _research_opportunity(kw, p))
         explore = 1 - pub_per_seg[seg] / max_pub      # 적게 발행된 세그먼트 ↑
         diversity = rem_per_seg[seg] / max_rem         # 잔량 많은 세그먼트 ↑
         total = (w["demand"] * demand_s + w["seg"] * seg_s + w["seo"] * seo_s
