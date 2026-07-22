@@ -112,6 +112,7 @@ def t_growth():
     check("winnability 저순위(>10)=할인", growth._winnability("x", {"x": 25}) < 1.0)
     # _research_opportunity: 리서치 없으면 0(기여 없음)
     check("research 기회 없는 키워드=0", growth._research_opportunity("리서치없음zzz", SAMPLE) == 0.0)
+    check("research 페널티 없는 키워드=1.0", growth._research_penalty("리서치없음zzz", SAMPLE) == 1.0)
     check("demand_score 0~1", 0.0 <= growth._demand_score("아무거나", {}) <= 1.0)
     # segment_scores: a/b/c 키 + 0~1
     segs = growth.segment_scores()

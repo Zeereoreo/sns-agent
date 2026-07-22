@@ -238,6 +238,25 @@ def _research_opportunity(kw: str, path: Path) -> float:
     return max(0.6, min(1.0, ratio / 1.8))   # 1.2배→0.67, 1.8배+→1.0
 
 
+def _research_penalty(kw: str, path: Path) -> float:
+    """경쟁 상위글이 우리보다 확실히 깊으면(길이비<0.9) 승산 낮음 → demand 할인(<1).
+    신생 블로그는 더 깊게 못 쓰면 깊은 경쟁을 못 이긴다. _research_opportunity 의 대칭
+    (깊으면 우대, 얕으면 할인). 리서치 없거나 비등/우세면 1.0(영향 없음)."""
+    rf = RESEARCH_DIR / f"{_research_slug(kw)}.json"
+    if not rf.exists():
+        return 1.0
+    bench = _load(rf, {}).get("length_benchmark")
+    if not bench:
+        return 1.0
+    our_len = _draft_body_len(path)
+    if our_len is None:
+        return 1.0
+    ratio = our_len / bench
+    if ratio >= 0.9:
+        return 1.0
+    return max(0.5, ratio)     # 0.9→0.9, 0.67→0.67, 0.5이하→하한 0.5
+
+
 def _winnability(kw: str, latest: dict) -> float:
     """승산 보정 0~1. 수요(자동완성)는 검색활동만 재고 '우리가 이길 수 있는지'는
     못 잰다. 그래서 우리 실측 순위를 승산 신호로 쓴다:
@@ -282,9 +301,11 @@ def rank_queue() -> list[dict]:
         kw = primary_keyword(p)
         seg_s = segs[seg]
         seo_s = _seo_score(p)
-        # 검색 수요 × 승산 보정(못 이긴다고 드러난 head 키워드는 깎임).
-        # 단, 리서치로 '경쟁보다 깊게 썼다'가 확인되면 저수요여도 기회 점수로 끌어올림.
-        demand_s = _demand_score(kw, dmap) * _winnability(kw, latest)
+        # 검색 수요 × 승산 보정(못 이긴다고 드러난 head 는 깎임) × 경쟁깊이 페널티
+        # (경쟁이 우리보다 깊으면 할인). 단, 리서치로 '경쟁보다 깊게 썼다'가 확인되면
+        # 저수요여도 기회 점수로 끌어올림(대칭 보정).
+        demand_s = (_demand_score(kw, dmap) * _winnability(kw, latest)
+                    * _research_penalty(kw, p))
         demand_s = max(demand_s, _research_opportunity(kw, p))
         explore = 1 - pub_per_seg[seg] / max_pub      # 적게 발행된 세그먼트 ↑
         diversity = rem_per_seg[seg] / max_rem         # 잔량 많은 세그먼트 ↑
