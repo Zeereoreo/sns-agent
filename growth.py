@@ -199,6 +199,22 @@ def _demand_score(kw: str, dmap: dict) -> float:
     return min(1.0, n / 5.0)
 
 
+def _winnability(kw: str, latest: dict) -> float:
+    """승산 보정 0~1. 수요(자동완성)는 검색활동만 재고 '우리가 이길 수 있는지'는
+    못 잰다. 그래서 우리 실측 순위를 승산 신호로 쓴다:
+      - 이미 상위(≤10위) 노출 = 승산 입증 → 1.0
+      - 측정했는데 30위 밖(None)/저순위(>10) = 신생 블로그가 못 이기는 키워드 → 할인
+      - 미측정 = 아직 기회(발행해서 확인) → 할인 없음 1.0
+    head term(아이스버킷·네온사인 등)은 수요는 높아도 30위 밖으로 드러나 여기서 걸린다.
+    """
+    if kw not in latest:
+        return 1.0
+    r = latest[kw]
+    if isinstance(r, int) and r <= 10:
+        return 1.0
+    return 0.35
+
+
 def rank_queue() -> list[dict]:
     """미발행 초안 전부를 우선순위 점수와 함께 정렬해 반환(설명 포함)."""
     w = load_weights()
@@ -206,6 +222,7 @@ def rank_queue() -> list[dict]:
     published = set(state.get("published", []))
     segs = segment_scores()
     dmap = _demand_map()
+    latest = _latest_ranks()
 
     # 세그먼트별 발행 수(explore: 적게 발행된 세그먼트 우대)
     pub_per_seg = {"a": 0, "b": 0, "c": 0}
@@ -226,7 +243,8 @@ def rank_queue() -> list[dict]:
         kw = primary_keyword(p)
         seg_s = segs[seg]
         seo_s = _seo_score(p)
-        demand_s = _demand_score(kw, dmap)             # 검색 수요(방문자 직결)
+        # 검색 수요 × 승산 보정(못 이긴다고 드러난 head 키워드는 깎임)
+        demand_s = _demand_score(kw, dmap) * _winnability(kw, latest)
         explore = 1 - pub_per_seg[seg] / max_pub      # 적게 발행된 세그먼트 ↑
         diversity = rem_per_seg[seg] / max_rem         # 잔량 많은 세그먼트 ↑
         total = (w["demand"] * demand_s + w["seg"] * seg_s + w["seo"] * seo_s
