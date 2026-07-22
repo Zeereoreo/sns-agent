@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 import time
 from datetime import date, datetime
@@ -232,20 +231,27 @@ def _run(dry_run: bool = True) -> None:
         except Exception as e:
             print("성장엔진 튜닝 건너뜀:", e)
 
-        # 다음 발행 예정글의 경쟁 분석을 미리 준비(없을 때만). 실패해도 무시.
+        # 성장엔진 우선순위 상위 후보의 경쟁 분석을 미리 준비(리서치 없는 것 최대 2편).
+        # 경쟁깊이 승산 신호(growth._research_opportunity/_research_penalty)가 실제로 작동하려면
+        # '발행될 초안'의 키워드에 경쟁 데이터가 있어야 한다. (예전엔 인터리브 순서의 엉뚱한
+        # 초안을 리서치했다 — 실제 발행은 성장엔진 점수순인데.)
         try:
+            import growth  # noqa: PLC0415
             import research  # noqa: PLC0415
-            nx = research._next_draft()
-            slug = None
-            if nx:
-                kw, _ = research._kw_from(nx)
-                slug = re.sub(r"[^가-힣a-zA-Z0-9]+", "_", kw)[:40]
-            if slug and not (ROOT / "data" / "research" / f"{slug}.json").exists():
-                res = research.analyze(nx)
+            RDIR = ROOT / "data" / "research"
+            done = 0
+            for row in growth.rank_queue():
+                if done >= 2:
+                    break
+                kw = row.get("keyword")
+                if not kw or (RDIR / f"{research._slug(kw)}.json").exists():
+                    continue
+                res = research.analyze(row["name"])
                 # 경쟁글을 하나도 못 얻었으면(스크래핑 실패 가능성) 빈 결과를 캐시하지 않는다.
                 if res.get("competitors") or res.get("length_benchmark"):
                     research.save(res)
-                    print(f"[경쟁분석] 다음 글 '{kw}' 준비 완료")
+                    print(f"[경쟁분석] 상위 후보 '{kw}' 준비 완료")
+                    done += 1
                 else:
                     print(f"[경쟁분석] '{kw}' 결과 없음 — 저장 안 함(다음 실행에서 재시도).")
         except Exception as e:
