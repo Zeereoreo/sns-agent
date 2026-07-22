@@ -101,11 +101,17 @@ def _latest_ranks() -> dict:
 
 
 def segment_scores() -> dict:
-    """세그먼트별 관측 성과 0~1(높을수록 잘됨). 발행글 키워드의 평균 순위 기반.
-    데이터 없으면 중립 0.5."""
+    """세그먼트별 관측 성과 0~1(높을수록 잘됨). 발행글 순위를 '검색수요로 가중'한 평균.
+
+    정직 교정: 수요 0 키워드에서 1위여도 방문자는 0이다. 경쟁 없는 죽은 키워드의
+    쉬운 1위를 '성과'로 세면 엔진이 그쪽으로 쏠린다. 그래서 각 발행글의 순위 성과를
+    그 키워드의 검색수요로 가중한다(수요0=가중0=성과 미반영). 수요 있는 발행글이
+    아직 없으면 근거 부족이므로 중립 0.5.
+    """
     state = _load(STATE, {"published": []})
     latest = _latest_ranks()
-    per_seg_ranks: dict[str, list[float]] = {"a": [], "b": [], "c": []}
+    dmap = _demand_map()
+    per_seg: dict[str, list[tuple[float, float]]] = {"a": [], "b": [], "c": []}
     for name in state.get("published", []):
         p = DRAFTS / name
         if not p.exists():
@@ -114,17 +120,18 @@ def segment_scores() -> dict:
         r = latest.get(kw)
         seg = _segment(name)
         if isinstance(r, int):
-            per_seg_ranks[seg].append(r)
+            rank_s = max(0.0, min(1.0, 1 - (r - 1) / (MAX_RANK - 1)))
+            weight = _demand_score(kw, dmap)  # 수요=성과 가중치. 수요0이면 반영 0.
+            per_seg[seg].append((rank_s, weight))
         # 순위 미측정(키워드가 아직 metrics 에 없음)은 페널티 아님 → 건너뜀(중립).
-        # (리타겟 직후엔 새 키워드가 아직 수집 전이라 여기 걸린다)
     out = {}
     for seg in "abc":
-        rs = per_seg_ranks[seg]
-        if not rs:
-            out[seg] = 0.5
+        pairs = per_seg[seg]
+        wsum = sum(wt for _, wt in pairs)
+        if not pairs or wsum <= 0:
+            out[seg] = 0.5  # 수요 있는 발행글이 아직 없음 → 근거 부족, 중립
         else:
-            avg = sum(rs) / len(rs)
-            out[seg] = max(0.0, min(1.0, 1 - (avg - 1) / (MAX_RANK - 1)))
+            out[seg] = sum(rs * wt for rs, wt in pairs) / wsum
     return out
 
 
@@ -269,6 +276,7 @@ def evaluate_and_tune(apply: bool = True) -> dict:
     state = _load(STATE, {"published": []})
     latest = _latest_ranks()
     segs = segment_scores()
+    dmap = _demand_map()
 
     adjust = {k: 0.0 for k in DEFAULT_WEIGHTS}
     samples = 0
@@ -281,7 +289,12 @@ def evaluate_and_tune(apply: bool = True) -> dict:
         if not isinstance(r, int):
             continue
         samples += 1
-        good = r <= 5           # 성과 판정: 1페이지 상단
+        # 정직 교정: 순위가 좋아도(대개 1위) 수요0이면 방문자 0 → '좋은 성과'가 아니다.
+        # 이 결정의 교훈은 "수요 신호를 더 봐야 한다"이므로 demand 가중치를 올린다.
+        if _demand_score(kw, dmap) <= 0:
+            adjust["demand"] += 0.02
+            continue
+        good = r <= 5           # 수요 있는 키워드에서의 1페이지 상단만 진짜 성과
         seg = _segment(name)
         # 결정 당시 신호값(근사: 현재 세그먼트점수/ SEO)
         signals = {"seg": segs[seg], "seo": _seo_score(p),
