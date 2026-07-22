@@ -46,8 +46,9 @@ METRICS = ROOT / "data" / "metrics.json"
 WEIGHTS_FILE = ROOT / "data" / "growth_weights.json"
 GLOG = ROOT / "data" / "growth_log.json"
 
-DEFAULT_WEIGHTS = {"seg": 0.35, "seo": 0.30, "diversity": 0.20, "explore": 0.15}
+DEFAULT_WEIGHTS = {"demand": 0.35, "seg": 0.20, "seo": 0.20, "diversity": 0.15, "explore": 0.10}
 MAX_RANK = 30  # 이 순위 밖은 최하로 취급
+DEMAND_CACHE = ROOT / "data" / "demand_cache.json"
 
 
 # ---------- 데이터 로드 ----------
@@ -114,8 +115,8 @@ def segment_scores() -> dict:
         seg = _segment(name)
         if isinstance(r, int):
             per_seg_ranks[seg].append(r)
-        elif kw:  # 발행됐지만 순위 밖 = 성과 낮음
-            per_seg_ranks[seg].append(MAX_RANK)
+        # 순위 미측정(키워드가 아직 metrics 에 없음)은 페널티 아님 → 건너뜀(중립).
+        # (리타겟 직후엔 새 키워드가 아직 수집 전이라 여기 걸린다)
     out = {}
     for seg in "abc":
         rs = per_seg_ranks[seg]
@@ -178,12 +179,26 @@ def _seo_score(path: Path) -> float:
         return 0.8
 
 
+def _demand_map() -> dict:
+    """data/demand_cache.json — {키워드: 자동완성수}. demand.py audit 로 갱신."""
+    return _load(DEMAND_CACHE, {})
+
+
+def _demand_score(kw: str, dmap: dict) -> float:
+    """검색 수요 0~1(자동완성 5개 이상이면 1.0). 방문자 직결 신호."""
+    n = dmap.get(kw)
+    if n is None or n < 0:
+        return 0.3          # 미측정: 중립 이하
+    return min(1.0, n / 5.0)
+
+
 def rank_queue() -> list[dict]:
     """미발행 초안 전부를 우선순위 점수와 함께 정렬해 반환(설명 포함)."""
     w = load_weights()
     state = _load(STATE, {"published": []})
     published = set(state.get("published", []))
     segs = segment_scores()
+    dmap = _demand_map()
 
     # 세그먼트별 발행 수(explore: 적게 발행된 세그먼트 우대)
     pub_per_seg = {"a": 0, "b": 0, "c": 0}
@@ -201,17 +216,20 @@ def rank_queue() -> list[dict]:
     rows = []
     for p in unpub:
         seg = _segment(p.name)
+        kw = primary_keyword(p)
         seg_s = segs[seg]
         seo_s = _seo_score(p)
+        demand_s = _demand_score(kw, dmap)             # 검색 수요(방문자 직결)
         explore = 1 - pub_per_seg[seg] / max_pub      # 적게 발행된 세그먼트 ↑
         diversity = rem_per_seg[seg] / max_rem         # 잔량 많은 세그먼트 ↑
-        total = (w["seg"] * seg_s + w["seo"] * seo_s
+        total = (w["demand"] * demand_s + w["seg"] * seg_s + w["seo"] * seo_s
                  + w["explore"] * explore + w["diversity"] * diversity)
         rows.append({
-            "name": p.name, "seg": seg, "keyword": primary_keyword(p),
+            "name": p.name, "seg": seg, "keyword": kw,
             "score": round(total, 4),
-            "breakdown": {"seg": round(seg_s, 2), "seo": round(seo_s, 2),
-                          "explore": round(explore, 2), "diversity": round(diversity, 2)},
+            "breakdown": {"demand": round(demand_s, 2), "seg": round(seg_s, 2),
+                          "seo": round(seo_s, 2), "explore": round(explore, 2),
+                          "diversity": round(diversity, 2)},
         })
     rows.sort(key=lambda r: r["score"], reverse=True)
     return rows
