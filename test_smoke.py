@@ -113,6 +113,11 @@ def t_growth():
     # _research_opportunity: 리서치 없으면 0(기여 없음)
     check("research 기회 없는 키워드=0", growth._research_opportunity("리서치없음zzz", SAMPLE) == 0.0)
     check("research 페널티 없는 키워드=1.0", growth._research_penalty("리서치없음zzz", SAMPLE) == 1.0)
+    # 손님 적합성: BJ/스트리머(피켓·전광판)=1.0 > 엔터(노래방)=0.92 > 일반상가(상가 간판)=0.6
+    check("fit BJ 우선(응원 피켓 제작)=1.0", growth._fit_multiplier("응원 피켓 제작") == 1.0)
+    check("fit 엔터(노래방 간판) 중간", 0.9 <= growth._fit_multiplier("노래방 간판") < 1.0)
+    check("fit 일반상가(상가 간판) 감점", growth._fit_multiplier("상가 간판") < 0.7)
+    check("fit BJ > 일반상가", growth._fit_multiplier("전광판 제작") > growth._fit_multiplier("카페 간판"))
     check("demand_score 0~1", 0.0 <= growth._demand_score("아무거나", {}) <= 1.0)
     # segment_scores: a/b/c 키 + 0~1
     segs = growth.segment_scores()

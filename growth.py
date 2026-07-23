@@ -192,6 +192,27 @@ def _demand_map() -> dict:
     return _load(DEMAND_CACHE, {})
 
 
+# 손님 적합성 우선순위 (사용자 확정 2026-07-23: BJ/스트리머 > 엔터/야간 > 일반상가).
+# 수요·승산이 같아도 우선순위 손님에 맞는 글을 먼저 발행하도록 총점에 곱한다.
+# 일반상가는 배제가 아니라 감점('그런 경우도 있음'). 튜닝 가능한 키워드 분류.
+_FIT_PRIORITY = ("피켓", "전광판", "방송", "시그니처", "응원", "조공", "스트리머", "비제이")
+_FIT_ENTER = ("네온", "클럽", "유흥", "노래방", "술집", "포차", "이자카야", "호프", "아이스버킷")
+_FIT_OFFTARGET = ("약국", "병원", "학원", "네일", "미용실", "카페 간판", "상가 간판",
+                  "간판 교체", "매장 간판", "프랜차이즈", "간판 제작", "간판 디자인",
+                  "돌출간판", "아크릴 메뉴판", "아크릴 간판")
+
+
+def _fit_multiplier(kw: str) -> float:
+    """손님 우선순위 반영. BJ/스트리머(방송소품)=1.0, 엔터/야간=0.92, 일반상가=0.6, 미분류=0.85."""
+    if any(t in kw for t in _FIT_PRIORITY):
+        return 1.0
+    if any(t in kw for t in _FIT_ENTER):
+        return 0.92
+    if any(t in kw for t in _FIT_OFFTARGET):
+        return 0.6
+    return 0.85
+
+
 def _demand_score(kw: str, dmap: dict) -> float:
     """검색 수요 0~1(자동완성 5개 이상이면 1.0). 방문자 직결 신호."""
     n = dmap.get(kw)
@@ -309,14 +330,16 @@ def rank_queue() -> list[dict]:
         demand_s = max(demand_s, _research_opportunity(kw, p))
         explore = 1 - pub_per_seg[seg] / max_pub      # 적게 발행된 세그먼트 ↑
         diversity = rem_per_seg[seg] / max_rem         # 잔량 많은 세그먼트 ↑
-        total = (w["demand"] * demand_s + w["seg"] * seg_s + w["seo"] * seo_s
-                 + w["explore"] * explore + w["diversity"] * diversity)
+        base = (w["demand"] * demand_s + w["seg"] * seg_s + w["seo"] * seo_s
+                + w["explore"] * explore + w["diversity"] * diversity)
+        fit = _fit_multiplier(kw)                      # 손님 우선순위(BJ/스트리머 우선)
+        total = base * fit
         rows.append({
             "name": p.name, "seg": seg, "keyword": kw,
             "score": round(total, 4),
             "breakdown": {"demand": round(demand_s, 2), "seg": round(seg_s, 2),
                           "seo": round(seo_s, 2), "explore": round(explore, 2),
-                          "diversity": round(diversity, 2)},
+                          "diversity": round(diversity, 2), "fit": round(fit, 2)},
         })
     rows.sort(key=lambda r: r["score"], reverse=True)
     return rows
