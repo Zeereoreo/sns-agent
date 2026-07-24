@@ -52,6 +52,33 @@ def _photo_allowed(photo_name: str, draft_name: str) -> bool:
     return True
 
 
+# a(BJ/스트리머) 글: 초안 파일명 토큰 → 주제에 맞는 사진명 키워드.
+# 대표(첫 사진)가 글 주제와 맞는 네온 실물컷이 되게 한다(2026-07-24 사용자 지시:
+# "주제에 맞게 섬네일" — 주 고객 = 비제이/스트리머).
+A_PHOTO_THEME = [
+    (("cheer",), ("하트", "큰손등장")),
+    (("nickname", "crew"), ("곰돌이", "킹날개")),
+    (("vip",), ("VVIP",)),                       # vip/vvip 둘 다 부분일치
+    (("reaction", "bigfan"), ("큰손",)),
+    (("bulk", "event"), ("드럼세트", "로얄")),
+    (("signature", "price"), ("시그니처",)),
+    (("battery",), ("배터리",)),
+    (("design",), ("미키하트",)),
+]
+
+
+def _theme_photo(draft_name: str, pool: list[Path]) -> Path | None:
+    """초안 주제에 맞는 사진 1장. 매칭 없으면 None(기존 순환 유지)."""
+    name = draft_name.lower()
+    for draft_kws, photo_kws in A_PHOTO_THEME:
+        if any(k in name for k in draft_kws):
+            for pk in photo_kws:
+                for p in pool:
+                    if pk in p.name:
+                        return p
+    return None
+
+
 def _imgs(d: Path) -> list[Path]:
     out: list[Path] = []
     if d.exists():
@@ -119,6 +146,12 @@ def pick_images(draft_path, n: int, advance: bool = True) -> tuple[list[Path], l
     same_seg = [p for p in pool if p.name.startswith(f"{seg}_")]
     pool = same_seg or pool
     if pool and len(picks) < n:
+        # a 글은 주제 맞는 사진을 먼저(아래 스왑으로 대표가 됨), 나머지는 순환
+        if seg == "a":
+            theme = _theme_photo(draft_name, pool)
+            if theme:
+                picks.append(theme)
+                pool = [p for p in pool if p != theme]
         start = _load_rot()
         steps = 0
         i = start

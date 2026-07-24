@@ -82,6 +82,18 @@ def t_images():
                                                      "a05_wireless-handboard-battery.md") is True)
     check("일반 사진: 항상 허용", im._photo_allowed("a_시그니처피켓디자인_02.jpg",
                                                "a17_cheer-picket-custom.md") is True)
+    # 주제 매칭 썸네일: 초안 주제에 맞는 네온 컷이 대표가 되게(2026-07-24 지시)
+    pool = [p for p in im._imgs(im.PHOTO_DIR) if p.parent == im.PHOTO_DIR]
+    tp = im._theme_photo("a17_cheer-picket-custom.md", pool)
+    check("테마: 응원→하트/큰손등장", tp is not None and ("하트" in tp.name or "큰손등장" in tp.name),
+          str(tp))
+    tp2 = im._theme_photo("a07_vip-vvip-picket.md", pool)
+    check("테마: VIP→VVIP 컷", tp2 is not None and "VVIP" in tp2.name, str(tp2))
+    check("테마: 무관 초안=None", im._theme_photo("a06_platform-picket-difference.md", pool) is None)
+    vip_draft = DRAFTS / "a07_vip-vvip-picket.md"
+    if vip_draft.exists():
+        vpicks, _ = im.pick_images(vip_draft, 3, advance=False)
+        check("a07 대표=VVIP 컷", vpicks and "VVIP" in vpicks[0].name, str(vpicks[:1]))
     # a(BJ/스트리머) 초안은 실물 피켓 사진이 대표(첫 장) — 썸네일 지시(2026-07-24)
     a_drafts = sorted(DRAFTS.glob("a*.md"))
     if a_drafts:
