@@ -40,6 +40,17 @@ INFOGRAPHIC_MAP = {
 # 세그먼트 기본 인포그래픽(주제 매칭 없을 때)
 SEGMENT_DEFAULT = {"a": "process-flow.png", "b": "bucket-compare.png", "c": "sign-compare.png"}
 
+# 특정 소재 사진은 해당 주제 글에만 붙인다 — 무관 글에 배터리컷이 붙어
+# 캡션과 사진이 어긋나는 사고 방지(2026-07-24 a17 발행에서 실제 발생).
+SPECIAL_PHOTO = {"배터리": ("battery", "배터리")}   # 사진명 키워드 → 허용 초안명 키워드
+
+
+def _photo_allowed(photo_name: str, draft_name: str) -> bool:
+    for kw, allow in SPECIAL_PHOTO.items():
+        if kw in photo_name and not any(a in draft_name for a in allow):
+            return False
+    return True
+
 
 def _imgs(d: Path) -> list[Path]:
     out: list[Path] = []
@@ -101,7 +112,9 @@ def pick_images(draft_path, n: int, advance: bool = True) -> tuple[list[Path], l
 
     # 3) 사진 풀 순환 재활용 — 같은 세그먼트(파일명 a_/b_/c_ 접두사) 사진을 우선한다.
     #    간판 글에 클럽 버킷 사진이 붙는 것을 막는다.
-    pool = [p for p in _imgs(PHOTO_DIR) if p.parent == PHOTO_DIR]
+    draft_name = Path(draft_path).name
+    pool = [p for p in _imgs(PHOTO_DIR)
+            if p.parent == PHOTO_DIR and _photo_allowed(p.name, draft_name)]
     seg = code[0] if code and code[0] in "abc" else "a"
     same_seg = [p for p in pool if p.name.startswith(f"{seg}_")]
     pool = same_seg or pool

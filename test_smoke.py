@@ -75,6 +75,13 @@ def t_images():
     picks, _ = im.pick_images(B13, 4)
     check("요청 수만큼 선택", len(picks) == 4, str(len(picks)))
     check("첫 장은 인포그래픽", picks and picks[0].parent == im.IMG_DIR)
+    # 배터리 사진은 배터리 주제 글에만(캡션-사진 불일치 방지)
+    check("배터리 사진: 무관 글 차단", im._photo_allowed("a_방송용엑셀피켓배터리_02.jpg",
+                                                    "a17_cheer-picket-custom.md") is False)
+    check("배터리 사진: 배터리 글 허용", im._photo_allowed("a_방송용엑셀피켓배터리_02.jpg",
+                                                     "a05_wireless-handboard-battery.md") is True)
+    check("일반 사진: 항상 허용", im._photo_allowed("a_시그니처피켓디자인_02.jpg",
+                                               "a17_cheer-picket-custom.md") is True)
     # a(BJ/스트리머) 초안은 실물 피켓 사진이 대표(첫 장) — 썸네일 지시(2026-07-24)
     a_drafts = sorted(DRAFTS.glob("a*.md"))
     if a_drafts:
