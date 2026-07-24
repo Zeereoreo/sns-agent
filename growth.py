@@ -259,6 +259,12 @@ def _research_opportunity(kw: str, path: Path) -> float:
     return max(0.6, min(1.0, ratio / 1.8))   # 1.2배→0.67, 1.8배+→1.0
 
 
+def _opportunity_allowed(kw: str, dmap: dict) -> bool:
+    """경쟁깊이 기회 승격 허용 여부. 실측 수요 0 키워드는 경쟁을 이겨도 방문자가
+    0이므로(수요0 1위 함정) 승격 금지. 미측정(None)은 아직 모름 → 허용."""
+    return dmap.get(kw) != 0
+
+
 def _research_penalty(kw: str, path: Path) -> float:
     """경쟁 상위글이 우리보다 확실히 깊으면(길이비<0.9) 승산 낮음 → demand 할인(<1).
     신생 블로그는 더 깊게 못 쓰면 깊은 경쟁을 못 이긴다. _research_opportunity 의 대칭
@@ -327,7 +333,8 @@ def rank_queue() -> list[dict]:
         # 저수요여도 기회 점수로 끌어올림(대칭 보정).
         demand_s = (_demand_score(kw, dmap) * _winnability(kw, latest)
                     * _research_penalty(kw, p))
-        demand_s = max(demand_s, _research_opportunity(kw, p))
+        if _opportunity_allowed(kw, dmap):
+            demand_s = max(demand_s, _research_opportunity(kw, p))
         explore = 1 - pub_per_seg[seg] / max_pub      # 적게 발행된 세그먼트 ↑
         diversity = rem_per_seg[seg] / max_rem         # 잔량 많은 세그먼트 ↑
         base = (w["demand"] * demand_s + w["seg"] * seg_s + w["seo"] * seo_s

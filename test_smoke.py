@@ -112,6 +112,10 @@ def t_growth():
     check("winnability 저순위(>10)=할인", growth._winnability("x", {"x": 25}) < 1.0)
     # _research_opportunity: 리서치 없으면 0(기여 없음)
     check("research 기회 없는 키워드=0", growth._research_opportunity("리서치없음zzz", SAMPLE) == 0.0)
+    # 기회 승격 게이트: 실측 수요 0 이면 경쟁을 이겨도 방문자 0 → 승격 금지
+    check("opportunity 실측수요0=금지", growth._opportunity_allowed("x", {"x": 0}) is False)
+    check("opportunity 수요있음=허용", growth._opportunity_allowed("x", {"x": 3}) is True)
+    check("opportunity 미측정=허용", growth._opportunity_allowed("x", {}) is True)
     check("research 페널티 없는 키워드=1.0", growth._research_penalty("리서치없음zzz", SAMPLE) == 1.0)
     # 손님 적합성: BJ/스트리머(피켓·전광판)=1.0 > 엔터(노래방)=0.92 > 일반상가(상가 간판)=0.6
     check("fit BJ 우선(응원 피켓 제작)=1.0", growth._fit_multiplier("응원 피켓 제작") == 1.0)
