@@ -28,6 +28,13 @@ MAX_POSTS_PER_DAY: int = int(os.environ.get("MAX_POSTS_PER_DAY", "1"))
 PUBLISH_WINDOW_START: str = os.environ.get("PUBLISH_WINDOW_START", "08:00")
 PUBLISH_WINDOW_END: str = os.environ.get("PUBLISH_WINDOW_END", "10:00")
 
+# ----- 블로그 카테고리 (발행 레이어에서 선택; 블로그의 카테고리명과 정확히 일치해야 함) -----
+SEGMENT_CATEGORY = {
+    "a": "방송용 피켓·전광판",        # BJ/스트리머 방송 소품
+    "b": "간판·네온사인·클럽 LED",   # 클럽/매장
+    "c": "간판·네온사인·클럽 LED",
+}
+
 # ----- 경로 -----
 DATA_DIR = ROOT / "data"
 DRAFTS_DIR = ROOT / "drafts"

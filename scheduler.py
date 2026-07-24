@@ -151,6 +151,26 @@ def _run(dry_run: bool = True) -> None:
         print("발행할 초안 없음(큐가 비었습니다).")
         return
 
+    # BJ/스트리머 위주 목록(2026-07-24 사용자 지시): 하루 최소 2편은 a(방송소품).
+    # 남은 슬롯을 전부 a 로 채워야만 쿼터가 차는 시점부터 개입(그 전엔 엔진 자유).
+    # a 초안이 소진되면 자동 해제. a 안에서의 순서는 성장엔진 rank_queue 를 따른다.
+    if not nxt.name.startswith("a"):
+        today_a = sum(1 for e in s["log"] if e.get("date") == today and e.get("ok")
+                      and str(e.get("draft", "")).startswith("a"))
+        slots_left = max(1, config.MAX_POSTS_PER_DAY - today_ok)
+        need_a = max(0, 2 - today_a)
+        if need_a >= slots_left:
+            try:
+                import growth  # noqa: PLC0415
+                a_pick = next((r["name"] for r in growth.rank_queue()
+                               if r["name"].startswith("a")
+                               and (DRAFTS / r["name"]).exists()), None)
+                if a_pick:
+                    print(f"[BJ 쿼터] 오늘 a {today_a}편/슬롯 {slots_left} → {a_pick} 로 교체")
+                    nxt = DRAFTS / a_pick
+            except Exception as e:
+                print("[BJ 쿼터] 건너뜀:", e)
+
     n = _image_slots(nxt)
     picks, used_inbox = imgmod.pick_images(nxt, n)
 
@@ -176,7 +196,8 @@ def _run(dry_run: bool = True) -> None:
     res: dict = {}
     try:
         res = naver.publish(str(nxt), image_paths=[str(x) for x in picks],
-                            dry_run=dry_run, headed=False) or {}
+                            dry_run=dry_run, headed=False,
+                            category=config.SEGMENT_CATEGORY.get(nxt.name[:1])) or {}
         ok = bool(res.get("ok"))
         reason = res.get("reason")
     except Exception as e:

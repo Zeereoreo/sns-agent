@@ -123,7 +123,9 @@ def pick_images(draft_path, n: int, advance: bool = True) -> tuple[list[Path], l
     if n >= 2 and len(picks) >= 2 and picks[0].parent == IMG_DIR \
             and picks[1].parent != IMG_DIR:
         name = Path(draft_path).name
-        if sum(ord(c) for c in name) % 2 == 1:   # 안정 해시(약 절반)
+        # a(BJ/스트리머) 글은 항상 실물 LED 피켓 사진이 대표(첫 장) — 블로그 목록
+        # 썸네일이 방송 소품으로 보이게(2026-07-24 사용자 지시). 나머지는 절반 다양화.
+        if seg == "a" or sum(ord(c) for c in name) % 2 == 1:   # 안정 해시(약 절반)
             picks[0], picks[1] = picks[1], picks[0]
 
     return picks[:n], used_inbox

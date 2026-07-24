@@ -52,6 +52,7 @@ SEL = {
     "publish_open": "[data-click-area='tpb.publish']",   # 상단 초록 '발행' 버튼
     "tag_input": "input#tag-input, input.tag_input, input[placeholder*='태그']",
     "publish_confirm": "[data-click-area='tpb*i.publish'], .confirm_btn__WEaBq",  # 레이어 최종 발행
+    "category_open": "[data-click-area='tpb*i.category']",  # 발행 레이어 카테고리 드롭다운
 }
 
 
@@ -172,7 +173,8 @@ def _verify_published(page, blog_id: str, title: str) -> str | None:
 
 def publish(draft_path: str, image_dir: str | None = None,
             image_paths: list | None = None,
-            dry_run: bool = True, headed: bool = True, review: bool = False) -> dict:
+            dry_run: bool = True, headed: bool = True, review: bool = False,
+            category: str | None = None) -> dict:
     """결과를 dict 로 돌려준다: {ok, reason, images_inserted, url, title}.
 
     ok=True 는 '블로그 목록에서 글을 확인함' 을 뜻한다(클릭 성공이 아니라).
@@ -308,6 +310,22 @@ def publish(draft_path: str, image_dir: str | None = None,
             page.locator(SEL["publish_open"]).first.click(timeout=5000)
             _pause()
             _shot(page, "04_publish_panel")
+            # 카테고리 선택(세그먼트→게시판). 실패해도 발행은 계속(기본 카테고리).
+            if category:
+                try:
+                    btn = page.locator(SEL["category_open"]).first
+                    if (btn.inner_text() or "").strip() != category:
+                        btn.click(timeout=3000)
+                        _pause(0.3, 0.7)
+                        page.locator("label", has_text=category).first.click(timeout=3000)
+                        _pause(0.2, 0.5)
+                        now = (page.locator(SEL["category_open"]).first.inner_text() or "").strip()
+                        if now == category:
+                            print(f"  카테고리: {category}")
+                        else:
+                            print(f"  ⚠ 카테고리 선택 확인 실패(현재 '{now}') — 기본 카테고리로 발행")
+                except Exception as e:
+                    print("  ⚠ 카테고리 선택 실패(기본 카테고리로 발행):", e)
             tag_ok = 0
             for tag in data["tags"]:
                 try:

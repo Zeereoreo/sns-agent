@@ -75,6 +75,13 @@ def t_images():
     picks, _ = im.pick_images(B13, 4)
     check("요청 수만큼 선택", len(picks) == 4, str(len(picks)))
     check("첫 장은 인포그래픽", picks and picks[0].parent == im.IMG_DIR)
+    # a(BJ/스트리머) 초안은 실물 피켓 사진이 대표(첫 장) — 썸네일 지시(2026-07-24)
+    a_drafts = sorted(DRAFTS.glob("a*.md"))
+    if a_drafts:
+        apicks, _ = im.pick_images(a_drafts[0], 3, advance=False)
+        check("a 초안 첫 장은 실물 사진(BJ 썸네일)",
+              len(apicks) >= 2 and apicks[0].parent == im.PHOTO_DIR,
+              str(apicks[:2]))
     photos = [p for p in picks if p.parent == im.PHOTO_DIR]
     if photos:
         seg_ok = all(p.name.startswith("b_") for p in photos)
