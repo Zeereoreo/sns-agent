@@ -197,6 +197,82 @@ def enrich(page, draft: str, post: dict, log_map: dict[str, str],
     return res
 
 
+def add_tags(page, draft: str, post: dict, log_map: dict[str, str],
+             tags: list[str], dry: bool) -> dict:
+    """이미 발행된 글의 태그를 보강한다(네이버 상한 10개).
+
+    측정(자동완성)이 놓쳤을 검색 경로를 태그로 열어두기 위함 — 비용 0, 되돌리기 쉬움.
+    """
+    blog = config.NAVER_BLOG_ID
+    res = {"draft": draft, "added": 0, "ok": False, "reason": None}
+    no = _log_no(post["url"]) or log_map.get(_norm(post["title"]))
+    if not no:
+        for cand in draft_title_candidates(draft):
+            k = _norm(cand)
+            no = log_map.get(k) or next(
+                (v for kk, v in log_map.items() if k and (k in kk or kk in k)), None)
+            if no:
+                break
+    if not no:
+        res["reason"] = "logNo 없음"
+        return res
+    try:
+        page.goto(f"https://blog.naver.com/{blog}/postupdate?logNo={no}", timeout=60000)
+        page.wait_for_timeout(3500)
+        for sel in (".se-popup-button-cancel", "button:has-text('취소')"):
+            try:
+                page.locator(sel).first.click(timeout=1500)
+                break
+            except Exception:
+                continue
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(600)
+
+        page.locator('[data-click-area="tpb.publish"]').first.click(timeout=8000)
+        page.wait_for_timeout(2000)
+
+        box = page.locator("input#tag-input, input.tag_input, input[placeholder*='태그']").first
+        # 태그 칩은 해시 클래스라 [class^="tag__"] 로 잡는다.
+        # (예전 셀렉터는 하나도 못 잡아 '이미 있는 태그'를 다시 입력했고,
+        #  Enter 가 안 먹은 사이 두 태그가 붙어 '스트리머굿즈스트리머굿즈제작' 이 생겼다.)
+        def current() -> set[str]:
+            got = page.eval_on_selector_all(
+                '[class^="tag__"]', "e => e.map(x => x.innerText.trim())")
+            return {t.lstrip("#").strip() for t in got if t.strip()}
+
+        cur = current()
+        room = 10 - len(cur)
+        want = [t.lstrip("#") for t in tags if t.lstrip("#") not in cur][:max(0, room)]
+        if not want:
+            res["ok"] = True
+            res["reason"] = f"이미 있음/자리 없음(현재 {len(cur)}개)"
+            return res
+        if dry:
+            res["ok"] = True
+            res["added"] = len(want)
+            res["reason"] = f"dry-run: {', '.join(want)}"
+            return res
+        for t in want:
+            before = len(current())
+            box.click()
+            page.keyboard.type(t, delay=35)
+            page.keyboard.press("Enter")
+            page.wait_for_timeout(900)
+            if len(current()) <= before:      # Enter 가 안 먹었다 → 붙은 태그를 만들지 않는다
+                page.keyboard.press("Enter")
+                page.wait_for_timeout(900)
+                if len(current()) <= before:
+                    res["reason"] = f"태그 '{t}' 입력 실패 — 중단"
+                    return res
+            res["added"] += 1
+        page.locator('[data-click-area="tpb*i.publish"]').first.click(timeout=8000)
+        page.wait_for_timeout(6000)
+        res["ok"] = True
+    except Exception as e:
+        res["reason"] = f"오류: {str(e)[:70]}"
+    return res
+
+
 def fix_urls(page, blog: str) -> int:
     """publish_state 의 URL 중 logNo 가 없는 것(홈 주소 폴백)을 목록 API 로 되찾아 채운다.
     내부 링크·글 보강이 전부 logNo 에 의존하므로 데이터를 먼저 바로잡는다."""
@@ -230,6 +306,8 @@ def fix_urls(page, blog: str) -> int:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--fix-urls", action="store_true", help="logNo 없는 URL 기록 복구")
+    ap.add_argument("--add-tags", default=None,
+                    help="발행된 글에 태그 추가(쉼표 구분). 예: 스트리머굿즈,스트리머굿즈제작")
     ap.add_argument("--only", default=None, help="초안 접두사(예: c22)")
     ap.add_argument("--target", type=int, default=9)
     ap.add_argument("--dry-run", action="store_true")
@@ -260,6 +338,14 @@ def main() -> None:
             for d, p in items:
                 no = _log_no(p["url"]) or log_map.get(_norm(p["title"])) or "-"
                 print(f"  {d[:32]:34} logNo={no}")
+            ctx.close()
+            return
+        if a.add_tags:
+            tags = [t.strip() for t in a.add_tags.split(",") if t.strip()]
+            for d, p in items:
+                r = add_tags(page, d, p, log_map, tags, a.dry_run)
+                mark = "OK " if r["ok"] else "FAIL"
+                print(f"[{mark}] {d[:32]:34} +{r['added']}개  {r['reason'] or ''}")
             ctx.close()
             return
         for d, p in items:
