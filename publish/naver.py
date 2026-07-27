@@ -287,11 +287,18 @@ def publish(draft_path: str, image_dir: str | None = None,
                             _pause(0.2, 0.5)
                     continue
                 if blk["kind"] == "heading":
-                    # 소제목은 굵게(가독성 + 강조 신호). Ctrl+B 토글로 감싼다.
-                    page.keyboard.press("Control+B")
-                    page.keyboard.type(blk["text"], delay=random.randint(15, 45))
-                    page.keyboard.press("Control+B")
-                    page.keyboard.press("Enter")
+                    # 에디터의 '소제목' 문단 서식을 쓴다 → se-sectionTitle 컴포넌트로 들어가
+                    # 발행 HTML 에서 heading 태그가 된다(검색엔진이 글 구조를 읽는 신호).
+                    # 굵게(Ctrl+B)는 <b> 라서 구조 신호가 안 된다 — 실패 시에만 폴백.
+                    if _set_text_format(page, "소제목"):
+                        page.keyboard.type(blk["text"], delay=random.randint(15, 45))
+                        page.keyboard.press("Enter")
+                        _set_text_format(page, "본문")
+                    else:
+                        page.keyboard.press("Control+B")
+                        page.keyboard.type(blk["text"], delay=random.randint(15, 45))
+                        page.keyboard.press("Control+B")
+                        page.keyboard.press("Enter")
                     _pause(0.2, 0.5)
                     continue
                 # 강조 포인트: CTA(👉) 직전에 굵게 삽입
@@ -440,6 +447,23 @@ def publish(draft_path: str, image_dir: str | None = None,
 
         ctx.close()
         return result
+
+
+def _set_text_format(page, label: str) -> bool:
+    """에디터 툴바의 '문단 서식'을 바꾼다(본문 / 소제목 / 인용구).
+
+    본문 텍스트에 같은 글자가 있어도 오클릭하지 않도록 툴바 버튼으로 범위를 좁힌다.
+    """
+    try:
+        page.locator('[data-name="text-format"]').first.click(timeout=4000)
+        page.wait_for_timeout(350)
+        page.locator(f'button.se-toolbar-option-text-button:has-text("{label}")') \
+            .first.click(timeout=4000)
+        page.wait_for_timeout(300)
+        return True
+    except Exception as e:
+        print(f"  문단 서식('{label}') 적용 실패:", str(e)[:70])
+        return False
 
 
 def _insert_image(page, img_path: Path) -> bool:

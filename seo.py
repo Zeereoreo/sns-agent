@@ -53,6 +53,7 @@ WEIGHTS = {
     "tag_kw": 4,         # 태그에 키워드 토큰
 }
 TITLE_MAX = 42
+TITLE_GOOGLE = 30    # 구글 SERP 가 한글 제목을 자르는 지점(대략)
 BODY_MIN = 1000
 BODY_GOOD = 1500
 
@@ -120,7 +121,12 @@ def score_draft(path: Path) -> dict:
 
     add("title_kw", bool(kw and (kw in title or sum(1 for t in kw_tokens if t in title) >= max(1, len(kw_tokens) - 1))),
         f"제목에 '{kw}' {'포함' if kw and kw in title else '부분/누락'}")
-    add("title_len", len(title) <= TITLE_MAX, f"제목 {len(title)}자 (≤{TITLE_MAX} 권장)")
+    # 구글 검색결과는 한글 제목을 30자 안팎에서 자른다(네이버 상한 42자와 별개).
+    # 30자 이내면 만점, 42자까지는 부분점수.
+    add("title_len", len(title) <= TITLE_GOOGLE,
+        f"제목 {len(title)}자 (구글 노출 {TITLE_GOOGLE}자·네이버 {TITLE_MAX}자 기준)",
+        partial=(1.0 if len(title) <= TITLE_GOOGLE
+                 else max(0.0, (TITLE_MAX - len(title)) / (TITLE_MAX - TITLE_GOOGLE))))
     add("intro_kw", bool(kw and (kw in first_para or sum(1 for t in kw_tokens if t in first_para) >= max(1, len(kw_tokens) - 1))),
         f"첫 문단 키워드 {'있음' if kw and kw in first_para else '부분/누락'}")
     add("body_len", body_len >= BODY_MIN, f"본문 {body_len}자",
