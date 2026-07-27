@@ -137,6 +137,25 @@ def _session_ok(page, blog: str) -> bool | None:
     return None
 
 
+def _external_indexed(page, blog: str) -> int | None:
+    """네이버 밖 검색엔진에 우리 글이 몇 편이나 색인됐는지.
+
+    구글은 자동 조회를 차단하므로(검색 결과 대신 차단 페이지를 준다) 같은 웹 크롤 기반인
+    DuckDuckGo(빙 인덱스)로 대신 잰다. **구글 순위가 아니라 '색인 여부' 프록시**다.
+    실패하면 None — 0 으로 적어 가짜 하락을 만들지 않는다.
+    """
+    try:
+        q = quote(f"site:blog.naver.com {blog}")
+        r = page.request.get(f"https://html.duckduckgo.com/html/?q={q}",
+                             headers={"user-agent": "Mozilla/5.0"}, timeout=20000)
+        if not r.ok:
+            return None
+        html = r.text()
+        return len(set(re.findall(rf"blog\.naver\.com/{re.escape(blog)}/(\d{{6,}})", html)))
+    except Exception:
+        return None
+
+
 def _warn_session_expired(today: str) -> None:
     """세션 만료를 즉시 알린다(트레이 풍선 + 바탕화면 경고). 발행 실패를 기다리지 않는다."""
     try:
@@ -196,6 +215,16 @@ def collect(force_ranks: bool = False) -> dict:
                 print(f"[순위] 전건 수집 실패({failures}) — 오늘 순위 기록 보류.")
         elif not need_ranks:
             print("[순위] 오늘 이미 수집됨(건너뜀). 강제: --ranks")
+
+        # 외부 검색엔진 색인 수(하루 1회) — 네이버 밖 유입 가능성을 추적
+        if need_ranks:
+            n_idx = _external_indexed(page, blog)
+            if n_idx is not None:
+                data["external_index"] = {"count": n_idx, "engine": "duckduckgo(bing)",
+                                          "checked": f"{today} {datetime.now():%H:%M}"}
+                print(f"[외부색인] 검색엔진에 잡힌 글 {n_idx}편(구글 순위 아님, 색인 프록시)")
+            else:
+                print("[외부색인] 수집 실패 — 기록 보류")
 
         # 세션 점검은 매 실행. 만료를 '다음 발행이 실패하기 전에' 알린다.
         # (하루 1회만 하던 때는 07-27 09:14 에 만료를 기록해두고도 아무도 몰랐다.)

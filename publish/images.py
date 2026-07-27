@@ -88,7 +88,10 @@ def _group_pool(pool: list[Path]) -> list[list[Path]]:
     return [groups[k] for k in sorted(groups)]
 
 
-def photo_caption(path) -> str:
+_CAPTION_FORMS = ("{} 제작 사례", "{} 실물 컷", "{} 설치 예시", "{} 디테일 컷")
+
+
+def photo_caption(path, idx: int = 0) -> str:
     """사진 파일명에서 캡션을 만든다: a_LED피켓_012.jpg → 'LED 피켓 제작 사례'.
 
     초안 슬롯에 캡션을 고정해두면 순환으로 뽑힌 실제 사진과 어긋난다
@@ -108,7 +111,8 @@ def photo_caption(path) -> str:
     }.get(slug)
     if not label:
         return ""
-    return f"{label} 제작 사례"
+    # 같은 캡션이 한 글에 여러 번 반복되지 않게 표현을 돌려쓴다.
+    return _CAPTION_FORMS[idx % len(_CAPTION_FORMS)].format(label)
 
 
 def _imgs(d: Path) -> list[Path]:

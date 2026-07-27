@@ -127,6 +127,31 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", "", s or "")
 
 
+def related_links(draft_name: str, limit: int = 2) -> list[tuple[str, str]]:
+    """같은 세그먼트의 최근 발행 글 (제목, URL) 목록. 자기 글과 logNo 없는 기록은 제외."""
+    state = Path(__file__).resolve().parent.parent / "data" / "publish_state.json"
+    try:
+        s = json.loads(state.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    seg = draft_name[:1]
+    out: list[tuple[str, str]] = []
+    seen = set()
+    for e in reversed(s.get("log", [])):
+        if not e.get("ok") or e.get("dry") or e.get("draft") == draft_name:
+            continue
+        url, title = e.get("url") or "", e.get("title") or ""
+        if not title or not url.rstrip("/").split("/")[-1].isdigit():
+            continue
+        if not e.get("draft", "").startswith(seg) or e["draft"] in seen:
+            continue
+        seen.add(e["draft"])
+        out.append((title, url))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _verify_published(page, blog_id: str, title: str) -> str | None:
     """방금 쓴 글이 '진짜' 블로그에 올라갔는지 확인하고 URL을 돌려준다.
 
@@ -253,7 +278,7 @@ def publish(draft_path: str, image_dir: str | None = None,
                         cap = (blk.get("alt") or "").strip()
                         if not cap:
                             from publish.images import photo_caption  # noqa: PLC0415
-                            cap = photo_caption(images[img_i - 1])
+                            cap = photo_caption(images[img_i - 1], img_i - 1)
                         if ok_img and cap:
                             page.keyboard.type(f"▲ {cap}", delay=random.randint(15, 40))
                             page.keyboard.press("Enter")
@@ -288,6 +313,24 @@ def publish(draft_path: str, image_dir: str | None = None,
             ctx.close()   # 본문 없는 글을 올리느니 중단한다
             result["reason"] = "body_failed"
             return result
+
+        # 내부 링크 — 검색엔진이 글끼리의 관계를 읽는 통로이자 체류 시간에도 도움.
+        # 같은 세그먼트의 이전 발행 글 2편을 본문 끝에 링크한다.
+        try:
+            rel = related_links(Path(draft_path).name, limit=2)
+            if rel and not review:
+                page.keyboard.press("Enter")
+                page.keyboard.type("함께 보면 좋은 글", delay=random.randint(15, 35))
+                page.keyboard.press("Enter")
+                for title, url in rel:
+                    page.keyboard.type(f"· {title}", delay=random.randint(10, 25))
+                    page.keyboard.press("Enter")
+                    page.keyboard.type(url, delay=random.randint(8, 18))
+                    page.keyboard.press("Enter")
+                    _pause(0.2, 0.5)
+                print(f"  내부 링크 {len(rel)}개 삽입")
+        except Exception as e:
+            print("  내부 링크 건너뜀:", e)
 
         # 시도 횟수가 아니라 에디터에 실제로 들어간 이미지 수를 확인한다.
         try:
