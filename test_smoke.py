@@ -169,8 +169,21 @@ def t_dashboard():
     check("_metrics_view 키 존재", {"series", "kw_rows", "kw_on_page1"} <= set(mv))
 
 
+def t_scheduler_alert():
+    section("스케줄러 연속 실패 경고")
+    import scheduler
+    ok = {"ok": True, "dry": False}
+    bad = {"ok": False, "dry": False, "reason": "session_expired"}
+    dry = {"ok": False, "dry": True, "reason": "dry_run"}
+    check("성공 뒤면 0", scheduler._consecutive_failures([bad, bad, ok]) == 0)
+    check("연속 실패 셈", scheduler._consecutive_failures([ok, bad, bad]) == 2)
+    check("dry-run 은 무시", scheduler._consecutive_failures([ok, bad, dry, bad]) == 2)
+    check("빈 로그는 0", scheduler._consecutive_failures([]) == 0)
+
+
 def main():
-    for t in (t_parser, t_seo, t_images, t_metrics, t_research, t_growth, t_dashboard):
+    for t in (t_parser, t_seo, t_images, t_metrics, t_research, t_growth, t_dashboard,
+              t_scheduler_alert):
         try:
             t()
         except Exception:
