@@ -71,6 +71,16 @@ def t_parser():
           if re.search(r"_(g\d+)_", p.name)}
     check("한 글에 제품 그룹 2개 이하", len(gs) <= 2, f"groups={sorted(gs)}")
 
+    # 사진 일관성(2026-07-27 사용자 지적 "사진들이 일관성이 없다")
+    from publish.images import IMG_DIR, GROUP_MAX, _group_pool as _gp2, _imgs, PHOTO_DIR
+    allpool = [p for p in _imgs(PHOTO_DIR) if p.parent == PHOTO_DIR]
+    check("묶음이 너무 크지 않다", max(len(g) for g in _gp2(allpool)) <= GROUP_MAX,
+          max(len(g) for g in _gp2(allpool)))
+    check("대표는 항상 실물 사진", picks[0].parent != IMG_DIR, picks[0].name)
+    check("인포그래픽은 사이에 안 낀다",
+          all(p.parent != IMG_DIR for p in picks[1:-1]),
+          [p.name for p in picks if p.parent == IMG_DIR])
+
     # 내부 링크: json 임포트 누락으로 조용히 []를 반환하던 버그 잠금
     from publish.naver import related_links
     rel = related_links("c29_small-business-sign.md", limit=2)
@@ -116,7 +126,8 @@ def t_images():
     from publish import images as im
     picks, _ = im.pick_images(B13, 4)
     check("요청 수만큼 선택", len(picks) == 4, str(len(picks)))
-    check("첫 장은 인포그래픽", picks and picks[0].parent == im.IMG_DIR)
+    # 대표(첫 장)는 실물 사진이어야 한다 — 인포그래픽이 목록 썸네일이 되면 안 된다.
+    check("첫 장은 실물 사진", picks and picks[0].parent != im.IMG_DIR, picks[0].name)
     # 배터리 사진은 배터리 주제 글에만(캡션-사진 불일치 방지)
     check("배터리 사진: 무관 글 차단", im._photo_allowed("a_방송용엑셀피켓배터리_02.jpg",
                                                     "a17_cheer-picket-custom.md") is False)

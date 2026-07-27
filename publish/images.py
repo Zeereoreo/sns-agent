@@ -79,13 +79,26 @@ def _theme_photo(draft_name: str, pool: list[Path]) -> Path | None:
     return None
 
 
+GROUP_MAX = 8      # 한 묶음 최대 장수
+
+
 def _group_pool(pool: list[Path]) -> list[list[Path]]:
-    """사진을 제품 그룹(_gNN_)으로 묶는다. 그룹 표시가 없는 사진은 각자 1장짜리 그룹."""
+    """사진을 제품 묶음으로 나눈다. 그룹 표시가 없는 사진은 각자 1장짜리 묶음.
+
+    수확 순번의 연속 구간(_gNN_)은 피켓처럼 한 제품을 여러 번 찍은 경우엔 그대로 '한 제품'이지만,
+    간판은 원본 글이 여러 매장 사례를 연달아 올려서 한 구간에 75장·26장씩 들어간다
+    (= 서로 다른 간판이 뒤섞임). 그래서 큰 묶음은 GROUP_MAX 장씩 잘라 인접한 것끼리만 쓰게 한다.
+    """
     groups: dict[str, list[Path]] = {}
     for p in sorted(pool, key=lambda x: x.name):
         m = re.search(r"_(g\d+)_", p.name)
         groups.setdefault(f"{p.name.split('_')[1]}_{m.group(1)}" if m else p.name, []).append(p)
-    return [groups[k] for k in sorted(groups)]
+    out: list[list[Path]] = []
+    for k in sorted(groups):
+        g = groups[k]
+        for i in range(0, len(g), GROUP_MAX):
+            out.append(g[i:i + GROUP_MAX])
+    return out
 
 
 _CAPTION_FORMS = ("{} 제작 사례", "{} 실물 컷", "{} 설치 예시", "{} 디테일 컷")
@@ -212,15 +225,22 @@ def pick_images(draft_path, n: int, advance: bool = True) -> tuple[list[Path], l
     # 초안별 결정론적으로 '사진 우선'인 글은 실물 사진을 첫 장으로 올리고 인포그래픽은
     # 둘째 장으로 내린다(인포그래픽은 본문에 유지). 슬롯 2개 이상 + 첫 장이 인포그래픽 +
     # 둘째가 실물 사진일 때만.
-    if n >= 2 and len(picks) >= 2 and picks[0].parent == IMG_DIR \
-            and picks[1].parent != IMG_DIR:
-        name = Path(draft_path).name
-        # a(BJ/스트리머) 글은 항상 실물 LED 피켓 사진이 대표(첫 장) — 블로그 목록
-        # 썸네일이 방송 소품으로 보이게(2026-07-24 사용자 지시). 나머지는 절반 다양화.
-        if seg == "a" or sum(ord(c) for c in name) % 2 == 1:   # 안정 해시(약 절반)
-            picks[0], picks[1] = picks[1], picks[0]
+    # 대표(첫 장)는 **항상 실물 사진**. 인포그래픽(흰 배경 도해)이 대표로 뜨면 블로그 목록
+    # 썸네일이 표 이미지가 된다(2026-07-24 "썸네일이 왜 기존 블로그처럼 안 나오나" 지적).
+    if n >= 2 and len(picks) >= 2 and picks[0].parent == IMG_DIR:
+        real = next((i for i, p in enumerate(picks) if p.parent != IMG_DIR), None)
+        if real is not None:
+            picks[0], picks[real] = picks[real], picks[0]
 
-    return picks[:n], used_inbox
+    # 인포그래픽(흰 배경 도해)이 실물 사진들 사이에 끼면 톤이 튄다 → 맨 뒤로 보낸다.
+    # 대표(첫 장)로 남아야 하는 경우(위 스왑이 없었던 글)는 그대로 둔다.
+    picks = picks[:n]
+    if len(picks) > 2 and picks[0].parent != IMG_DIR:
+        info = [p for p in picks if p.parent == IMG_DIR]
+        if info:
+            picks = [p for p in picks if p.parent != IMG_DIR] + info
+
+    return picks, used_inbox
 
 
 def mark_inbox_used(paths: list[Path]) -> None:
