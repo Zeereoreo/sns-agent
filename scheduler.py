@@ -91,8 +91,6 @@ def _image_slots(draft: Path) -> int:
 LOCK = ROOT / "data" / ".publish.lock"
 LOCK_STALE_SEC = 25 * 60   # 이보다 오래된 락은 죽은 프로세스로 간주
 
-ALERT_FILE = (Path(os.environ.get("USERPROFILE", str(Path.home())))
-              / "Desktop" / "SNS Agent - 발행 중단 확인 필요.txt")
 ALERT_AFTER = 2   # 연속 실패가 이 횟수 이상이면 바탕화면 경고를 남긴다
 
 
@@ -109,25 +107,21 @@ def _consecutive_failures(log: list) -> int:
 
 
 def _update_alert_file(log: list) -> None:
-    """트레이 풍선은 12초면 사라져서 자리를 비우면 놓친다(2026-07-25~27 3일 중단을 그렇게 놓쳤다).
-    연속 실패가 쌓이면 복구될 때까지 바탕화면에 남는 경고 파일을 만든다."""
+    """연속 실패가 쌓이면 바탕화면 경고를 남기고, 발행이 복구되면 치운다."""
+    import notify  # noqa: PLC0415
     fails = _consecutive_failures(log)
-    try:
-        if fails >= ALERT_AFTER:
-            last = next(e for e in reversed(log) if not e.get("dry"))
-            ALERT_FILE.write_text(
-                f"SNS Agent 발행이 {fails}회 연속 실패했습니다.\n"
-                f"마지막 시도: {last.get('date')} {last.get('time')}  "
-                f"이유: {last.get('reason')}\n\n"
-                f"세션 만료면 아래로 다시 로그인하세요('로그인 상태 유지' 체크 필수).\n"
-                f"  cd {ROOT}\n"
-                f"  .\\.venv\\Scripts\\python.exe publish\\naver.py login\n\n"
-                f"발행이 복구되면 이 파일은 자동으로 사라집니다.\n",
-                encoding="utf-8")
-        elif ALERT_FILE.exists():
-            ALERT_FILE.unlink()
-    except Exception as e:
-        print("경고 파일 갱신 실패:", e)
+    if fails < ALERT_AFTER:
+        notify.clear_alert()
+        return
+    last = next(e for e in reversed(log) if not e.get("dry"))
+    notify.write_alert(
+        f"SNS Agent 발행이 {fails}회 연속 실패했습니다.\n"
+        f"마지막 시도: {last.get('date')} {last.get('time')}  "
+        f"이유: {last.get('reason')}\n\n"
+        f"세션 만료면 아래로 다시 로그인하세요('로그인 상태 유지' 체크 필수).\n"
+        f"  cd {ROOT}\n"
+        f"  .\\.venv\\Scripts\\python.exe publish\\naver.py login\n\n"
+        f"발행이 복구되면 이 파일은 자동으로 사라집니다.\n")
 
 
 def run(dry_run: bool = True) -> None:

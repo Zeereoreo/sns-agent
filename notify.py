@@ -9,8 +9,15 @@
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from pathlib import Path
+
+# 풍선은 12초 뒤 사라진다 — 자리를 비우면 못 본다(2026-07-25~27 3일 중단을 그렇게 놓쳤다).
+# 그래서 사람이 조치할 때까지 남는 경고를 바탕화면에도 둔다.
+ALERT_FILE = (Path(os.environ.get("USERPROFILE", str(Path.home())))
+              / "Desktop" / "SNS Agent - 발행 중단 확인 필요.txt")
 
 _PS = r"""
 Add-Type -AssemblyName System.Windows.Forms
@@ -44,6 +51,25 @@ def notify(title: str, message: str) -> bool:
     except Exception as e:
         print("알림 실패:", e)
         return False
+
+
+def write_alert(body: str) -> bool:
+    """조치할 때까지 남는 경고를 바탕화면에 쓴다."""
+    try:
+        ALERT_FILE.write_text(body, encoding="utf-8")
+        return True
+    except Exception as e:
+        print("경고 파일 쓰기 실패:", e)
+        return False
+
+
+def clear_alert() -> None:
+    """정상 복구 시 경고를 치운다."""
+    try:
+        if ALERT_FILE.exists():
+            ALERT_FILE.unlink()
+    except Exception as e:
+        print("경고 파일 삭제 실패:", e)
 
 
 if __name__ == "__main__":

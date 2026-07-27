@@ -180,6 +180,15 @@ def t_scheduler_alert():
     check("dry-run 은 무시", scheduler._consecutive_failures([ok, bad, dry, bad]) == 2)
     check("빈 로그는 0", scheduler._consecutive_failures([]) == 0)
 
+    import notify
+    notify.write_alert("테스트 경고")
+    check("경고 파일 생성", notify.ALERT_FILE.exists())
+    notify.clear_alert()
+    check("복구 시 경고 삭제", not notify.ALERT_FILE.exists())
+
+    import metrics
+    check("세션 만료 경고 함수 존재", callable(metrics._warn_session_expired))
+
 
 def main():
     for t in (t_parser, t_seo, t_images, t_metrics, t_research, t_growth, t_dashboard,

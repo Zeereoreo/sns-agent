@@ -137,6 +137,23 @@ def _session_ok(page, blog: str) -> bool | None:
     return None
 
 
+def _warn_session_expired(today: str) -> None:
+    """세션 만료를 즉시 알린다(트레이 풍선 + 바탕화면 경고). 발행 실패를 기다리지 않는다."""
+    try:
+        import notify  # noqa: PLC0415
+        notify.notify("SNS Agent 세션 만료",
+                      "네이버 세션이 만료됐습니다 — 재로그인 전까지 발행이 안 됩니다.")
+        notify.write_alert(
+            f"네이버 세션이 만료됐습니다({today} 점검).\n"
+            f"재로그인 전까지 예약 발행이 전부 실패합니다.\n\n"
+            f"  cd {ROOT}\n"
+            f"  .\\.venv\\Scripts\\python.exe publish\\naver.py login\n\n"
+            f"로그인 창에서 '로그인 상태 유지'를 반드시 체크하세요.\n"
+            f"발행이 정상화되면 이 파일은 자동으로 사라집니다.\n")
+    except Exception as e:
+        print("세션 만료 알림 실패:", e)
+
+
 def collect(force_ranks: bool = False) -> dict:
     from playwright.sync_api import sync_playwright  # noqa: PLC0415
     from publish.browser import launch_context  # noqa: PLC0415
@@ -177,14 +194,17 @@ def collect(force_ranks: bool = False) -> dict:
                 data.setdefault("ranks", {})[today] = ranks
             else:
                 print(f"[순위] 전건 수집 실패({failures}) — 오늘 순위 기록 보류.")
-
-            # 세션 사전 점검(하루 1회) — 만료를 발행 실패 전에 감지
-            so = _session_ok(page, blog)
-            if so is not None:
-                data["session"] = {"ok": so, "checked": f"{today} {datetime.now():%H:%M}"}
-                print(f"[세션] {'정상' if so else '만료 — 재로그인 필요'}")
         elif not need_ranks:
             print("[순위] 오늘 이미 수집됨(건너뜀). 강제: --ranks")
+
+        # 세션 점검은 매 실행. 만료를 '다음 발행이 실패하기 전에' 알린다.
+        # (하루 1회만 하던 때는 07-27 09:14 에 만료를 기록해두고도 아무도 몰랐다.)
+        so = _session_ok(page, blog)
+        if so is not None:
+            data["session"] = {"ok": so, "checked": f"{today} {datetime.now():%H:%M}"}
+            print(f"[세션] {'정상' if so else '만료 — 재로그인 필요'}")
+            if not so:
+                _warn_session_expired(today)
 
         ctx.close()
 
