@@ -111,8 +111,11 @@ def score_draft(path: Path) -> dict:
     add("headings", n_head >= 3, f"소제목 {n_head}개", partial=min(1.0, n_head / 4))
     add("faq", has_faq, "FAQ 섹션 " + ("있음" if has_faq else "없음"))
     add("images", n_img >= 3, f"이미지 슬롯 {n_img}개", partial=min(1.0, n_img / 3))
-    add("captions", n_img > 0 and n_cap == n_img, f"캡션 {n_cap}/{n_img}",
-        partial=(n_cap / n_img if n_img else 0))
+    # 캡션은 첫 슬롯(대표=인포그래픽)만 초안 ALT 로 쓴다. 나머지 슬롯은 발행 시
+    # 실제 삽입된 사진 파일명에서 만들어지므로(images.photo_caption) 여기서 미달로 보지 않는다.
+    n_capable = min(n_img, n_cap + max(0, n_img - 1))
+    add("captions", n_img > 0 and n_capable == n_img, f"캡션 {n_capable}/{n_img}",
+        partial=(n_capable / n_img if n_img else 0))
     add("tags", 5 <= len(d["tags"]) <= 10, f"태그 {len(d['tags'])}개", fixable=True)
     add("tag_kw", bool(kw_tokens and any(any(t in tag for t in kw_tokens) for tag in d["tags"])),
         "태그에 키워드 토큰 " + ("있음" if d["tags"] else "없음"), fixable=True)

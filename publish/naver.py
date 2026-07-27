@@ -249,7 +249,11 @@ def publish(draft_path: str, image_dir: str | None = None,
                         ok_img = _insert_image(page, images[img_i])
                         img_i += 1
                         # 캡션은 이미지가 실제로 삽입됐을 때만. (실패 시 고아 '▲ 캡션' 방지)
+                        # 초안에 캡션이 없으면 실제 삽입된 사진에서 만든다(항상 사진과 일치).
                         cap = (blk.get("alt") or "").strip()
+                        if not cap:
+                            from publish.images import photo_caption  # noqa: PLC0415
+                            cap = photo_caption(images[img_i - 1])
                         if ok_img and cap:
                             page.keyboard.type(f"▲ {cap}", delay=random.randint(15, 40))
                             page.keyboard.press("Enter")

@@ -49,7 +49,12 @@ def t_parser():
     heads = [b for b in d["blocks"] if b["kind"] == "heading"]
     imgs = [b for b in d["blocks"] if b["kind"] == "image"]
     check("소제목이 파싱된다(>0)", len(heads) > 0, f"heading={len(heads)}")
-    check("이미지 블록에 ALT 존재", imgs and all((b.get("alt") or "").strip() for b in imgs))
+    # 첫 슬롯(대표=인포그래픽)만 초안 ALT 를 쓰고, 나머지는 발행 시 실제 사진에서 캡션 생성.
+    check("첫 이미지 슬롯에 ALT 존재", imgs and (imgs[0].get("alt") or "").strip())
+    from publish.images import photo_caption
+    check("사진에서 캡션 생성", photo_caption("drafts/photos/c_LED아크릴사인_003.jpg")
+          == "LED 아크릴 사인 제작 사례", photo_caption("c_LED아크릴사인_003.jpg"))
+    check("모르는 사진은 캡션 없음", photo_caption("drafts/images/price-factors.png") == "")
     check("제목이 있다", d["title"] and d["title"] != "제목 없음")
     check("태그 5개 이상", len(d["tags"]) >= 5, f"tags={len(d['tags'])}")
     check("본문 text 블록이 # 로 시작하지 않음",

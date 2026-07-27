@@ -79,6 +79,29 @@ def _theme_photo(draft_name: str, pool: list[Path]) -> Path | None:
     return None
 
 
+def photo_caption(path) -> str:
+    """사진 파일명에서 캡션을 만든다: a_LED피켓_012.jpg → 'LED 피켓 제작 사례'.
+
+    초안 슬롯에 캡션을 고정해두면 순환으로 뽑힌 실제 사진과 어긋난다
+    (배터리 컷에 '피켓' 캡션이 붙던 사고). 캡션을 사진에서 파생하면 항상 맞는다.
+    """
+    stem = Path(path).stem
+    parts = stem.split("_")
+    if len(parts) < 2:
+        return ""
+    slug = parts[1]
+    label = {
+        "LED피켓": "LED 시그니처 피켓",
+        "LED버킷": "LED 아이스버킷",
+        "LED아크릴사인": "LED 아크릴 사인",
+        "골드나무간판": "골드·우드 간판",
+        "배터리셀": "피켓용 배터리",
+    }.get(slug)
+    if not label:
+        return ""
+    return f"{label} 제작 사례"
+
+
 def _imgs(d: Path) -> list[Path]:
     out: list[Path] = []
     if d.exists():
