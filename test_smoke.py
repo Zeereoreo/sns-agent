@@ -70,6 +70,13 @@ def t_parser():
     gs = {re.search(r"_(g\d+)_", p.name).group(1) for p in pool_picks
           if re.search(r"_(g\d+)_", p.name)}
     check("한 글에 제품 그룹 2개 이하", len(gs) <= 2, f"groups={sorted(gs)}")
+
+    # 내부 링크: json 임포트 누락으로 조용히 []를 반환하던 버그 잠금
+    from publish.naver import related_links
+    rel = related_links("c29_small-business-sign.md", limit=2)
+    check("내부 링크가 나온다", len(rel) > 0, f"{rel}")
+    check("내부 링크는 logNo URL", all(u.rstrip('/').split('/')[-1].isdigit() for _, u in rel))
+    check("자기 글은 제외", all("c29" not in t for t, _ in rel))
     check("제목이 있다", d["title"] and d["title"] != "제목 없음")
     check("태그 5개 이상", len(d["tags"]) >= 5, f"tags={len(d['tags'])}")
     check("본문 text 블록이 # 로 시작하지 않음",

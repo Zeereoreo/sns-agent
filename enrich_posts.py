@@ -55,6 +55,23 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", "", s or "")
 
 
+def draft_title_candidates(draft: str) -> list[str]:
+    """초안에서 가능한 제목들(H1 + 메타의 '제목안' 후보).
+    옛 발행 기록은 title 이 비어 있어 목록 API 와 대조하려면 초안에서 후보를 뽑아야 한다."""
+    import re
+    p = ROOT / "drafts" / draft
+    if not p.exists():
+        return []
+    text = p.read_text(encoding="utf-8")
+    out = []
+    m = re.search(r"^#\s+(.+)$", text, re.M)
+    if m:
+        out.append(m.group(1).strip())
+    for line in re.findall(r"^\s*(?:제목안:)?\s*\d\)\s*(.+)$", text, re.M):
+        out.append(line.strip())
+    return out
+
+
 def resolve_log_nos(page, blog: str) -> dict[str, str]:
     """게시글 목록 API 로 '정규화 제목 → logNo' 를 만든다.
     publish_state 의 옛 URL 에는 logNo 가 없어서(홈 주소 폴백) 이 대조가 필요하다."""
@@ -90,6 +107,13 @@ def enrich(page, draft: str, post: dict, log_map: dict[str, str],
     blog = config.NAVER_BLOG_ID
     res = {"draft": draft, "before": None, "after": None, "ok": False, "reason": None}
     no = _log_no(post["url"]) or log_map.get(_norm(post["title"]))
+    if not no:                       # 옛 기록은 title 이 비어 있다 → 초안 제목 후보로 대조
+        for cand in draft_title_candidates(draft):
+            key = _norm(cand)
+            no = log_map.get(key) or next(
+                (v for k, v in log_map.items() if key and (key in k or k in key)), None)
+            if no:
+                break
     if not no:
         res["reason"] = "logNo 를 찾지 못함(제목 불일치)"
         return res
@@ -185,6 +209,13 @@ def fix_urls(page, blog: str) -> int:
         if _log_no(e.get("url") or ""):
             continue
         no = log_map.get(_norm(e.get("title") or ""))
+        if not no:                   # 옛 기록은 title 도 비어 있다 → 초안 제목 후보로 대조
+            for cand in draft_title_candidates(e.get("draft", "")):
+                k = _norm(cand)
+                no = log_map.get(k) or next(
+                    (v for kk, v in log_map.items() if k and (k in kk or kk in k)), None)
+                if no:
+                    break
         if no:
             e["url"] = f"https://m.blog.naver.com/{blog}/{no}"
             fixed += 1

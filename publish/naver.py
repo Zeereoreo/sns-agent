@@ -129,10 +129,12 @@ def _norm(s: str) -> str:
 
 def related_links(draft_name: str, limit: int = 2) -> list[tuple[str, str]]:
     """같은 세그먼트의 최근 발행 글 (제목, URL) 목록. 자기 글과 logNo 없는 기록은 제외."""
+    import json  # noqa: PLC0415
     state = Path(__file__).resolve().parent.parent / "data" / "publish_state.json"
     try:
         s = json.loads(state.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as e:
+        print("  내부 링크: 상태파일을 읽지 못함:", e)   # 조용히 빈 값 반환하지 않는다
         return []
     seg = draft_name[:1]
     out: list[tuple[str, str]] = []
