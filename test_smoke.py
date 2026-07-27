@@ -55,6 +55,21 @@ def t_parser():
     check("사진에서 캡션 생성", photo_caption("drafts/photos/c_LED아크릴사인_003.jpg")
           == "LED 아크릴 사인 제작 사례", photo_caption("c_LED아크릴사인_003.jpg"))
     check("모르는 사진은 캡션 없음", photo_caption("drafts/images/price-factors.png") == "")
+
+    import re
+    from pathlib import Path as _P
+
+    from publish.images import _group_pool
+    gp = _group_pool([_P("a_LED피켓_g01_01.jpg"), _P("a_LED피켓_g01_02.jpg"),
+                      _P("a_LED피켓_g02_01.jpg"), _P("a_곰돌이네온피켓_01.jpg")])
+    check("제품 그룹으로 묶인다", [len(g) for g in gp] == [2, 1, 1], [len(g) for g in gp])
+
+    from publish.images import pick_images
+    picks, _ = pick_images("drafts/a04_reaction-picket-bigfan.md", 9, advance=False)
+    pool_picks = [p for p in picks if p.parent.name == "photos"]
+    gs = {re.search(r"_(g\d+)_", p.name).group(1) for p in pool_picks
+          if re.search(r"_(g\d+)_", p.name)}
+    check("한 글에 제품 그룹 2개 이하", len(gs) <= 2, f"groups={sorted(gs)}")
     check("제목이 있다", d["title"] and d["title"] != "제목 없음")
     check("태그 5개 이상", len(d["tags"]) >= 5, f"tags={len(d['tags'])}")
     check("본문 text 블록이 # 로 시작하지 않음",

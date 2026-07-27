@@ -43,9 +43,10 @@ WEIGHTS = {
     "title_kw": 16,      # 제목에 대표 키워드
     "title_len": 8,      # 제목 길이 적정
     "intro_kw": 14,      # 첫 문단에 대표 키워드
-    "body_len": 14,      # 본문 분량
-    "headings": 10,      # 소제목 수
+    "body_len": 10,      # 본문 분량
+    "headings": 8,       # 소제목 수
     "faq": 10,           # FAQ 섹션
+    "conversion": 6,     # 구매 판단을 돕는 구체성(수치·기준·실답변)
     "images": 10,        # 이미지 슬롯
     "captions": 8,       # 이미지 캡션(ALT)
     "tags": 6,           # 태그 개수
@@ -76,6 +77,22 @@ def _body_text(text: str) -> str:
             continue
         lines.append(s)
     return " ".join(lines)
+
+
+# 구매 판단을 돕는 구체 정보(치수·기간·가격대·수량)를 담은 문장 수 목표
+CONV_SPEC_GOOD = 6
+# 답을 안 하고 문의로 떠넘기는 문장 — FAQ 를 이걸로만 채우면 읽는 사람이 못 고른다
+_DODGE = re.compile(r"(알려주시면|문의\s*주시면|주시면)\s*[^.]{0,20}(안내|상담|확인)")
+
+
+def _conversion_signals(text: str, body: str) -> tuple[int, int]:
+    """(구체 수치 문장 수, 회피성 답변 수). 구매 결정을 돕는 정보가 실제로 있는지 본다."""
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n", body) if s.strip()]
+    spec = sum(1 for s in sentences
+               if re.search(r"\d+\s*(cm|mm|호|일|주|개월|년|만원|원|시간|분|W|V|%|장|개|kg"
+                            r"|가지|자|도|단계|중|배|회|종|명|평)", s))
+    dodge = len(_DODGE.findall(text))
+    return spec, dodge
 
 
 def score_draft(path: Path) -> dict:
@@ -110,6 +127,11 @@ def score_draft(path: Path) -> dict:
         partial=min(1.0, body_len / BODY_GOOD))
     add("headings", n_head >= 3, f"소제목 {n_head}개", partial=min(1.0, n_head / 4))
     add("faq", has_faq, "FAQ 섹션 " + ("있음" if has_faq else "없음"))
+    n_spec, n_dodge = _conversion_signals(text, body)
+    conv = min(1.0, n_spec / CONV_SPEC_GOOD) * (0.5 if n_dodge else 1.0)
+    add("conversion", n_spec >= CONV_SPEC_GOOD and not n_dodge,
+        f"구체 수치 {n_spec}개" + (f" / 회피답변 {n_dodge}개" if n_dodge else ""),
+        partial=conv)
     add("images", n_img >= 3, f"이미지 슬롯 {n_img}개", partial=min(1.0, n_img / 3))
     # 캡션은 첫 슬롯(대표=인포그래픽)만 초안 ALT 로 쓴다. 나머지 슬롯은 발행 시
     # 실제 삽입된 사진 파일명에서 만들어지므로(images.photo_caption) 여기서 미달로 보지 않는다.

@@ -79,6 +79,15 @@ def _theme_photo(draft_name: str, pool: list[Path]) -> Path | None:
     return None
 
 
+def _group_pool(pool: list[Path]) -> list[list[Path]]:
+    """사진을 제품 그룹(_gNN_)으로 묶는다. 그룹 표시가 없는 사진은 각자 1장짜리 그룹."""
+    groups: dict[str, list[Path]] = {}
+    for p in sorted(pool, key=lambda x: x.name):
+        m = re.search(r"_(g\d+)_", p.name)
+        groups.setdefault(f"{p.name.split('_')[1]}_{m.group(1)}" if m else p.name, []).append(p)
+    return [groups[k] for k in sorted(groups)]
+
+
 def photo_caption(path) -> str:
     """사진 파일명에서 캡션을 만든다: a_LED피켓_012.jpg → 'LED 피켓 제작 사례'.
 
@@ -175,15 +184,25 @@ def pick_images(draft_path, n: int, advance: bool = True) -> tuple[list[Path], l
             if theme:
                 picks.append(theme)
                 pool = [p for p in pool if p != theme]
+        # 한 글에는 '같은 제품' 사진이 들어가야 한다(2026-07-27 사용자 지시).
+        # 파일명의 _gNN_ 은 원본 촬영 시퀀스의 연속 구간 = 같은 제품 묶음이다.
+        need = n - len(picks)
+        groups = _group_pool(pool)
+        # 한 그룹으로 필요한 장수를 채울 수 있으면 그 그룹만 쓴다(한 글 = 한 제품).
+        # 채울 만한 그룹이 없을 때만 여러 그룹을 이어 붙인다.
+        groups = [g for g in groups if len(g) >= need] or groups
         start = _load_rot()
-        steps = 0
-        i = start
-        while len(picks) < n and steps < len(pool):
-            picks.append(pool[i % len(pool)])
-            i += 1
-            steps += 1
+        gi = start
+        used_groups = 0
+        while len(picks) < n and used_groups < len(groups):
+            for p in groups[gi % len(groups)]:
+                if len(picks) >= n:
+                    break
+                picks.append(p)
+            gi += 1
+            used_groups += 1
         if advance:
-            _save_rot(i)
+            _save_rot(gi)
 
     # 썸네일 다양화: 세그먼트마다 같은 인포그래픽이 대표(첫 장)로 반복되는 것을 막는다.
     # 초안별 결정론적으로 '사진 우선'인 글은 실물 사진을 첫 장으로 올리고 인포그래픽은
