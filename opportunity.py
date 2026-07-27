@@ -43,6 +43,23 @@ SEEDS = ["LED 간판", "네온사인", "아크릴 간판", "아크릴 메뉴판"
          "채널 간판", "술집 간판", "노래방 간판", "클럽 간판",
          "LED 피켓", "방송용 피켓", "무선 전광판", "응원 피켓"]
 
+# ★ 제품 적합성 게이트 (GROWTH_LOOP.md 최우선 규칙)
+# 자동완성은 동음이의어로 샌다 — '서포트' → 아치서포트(발 지지대)·핀서포트(건축 자재),
+# '커피차' → 커피창고(카페 이름), '응원봉' → 기아 응원봉(야구).
+# made-us 가 실제로 만드는 물건이 아닌 키워드는 아무리 수요가 커도 후보가 아니다.
+_PRODUCT = ("피켓", "전광판", "네온", "간판", "아크릴", "사인", "버킷", "메뉴판")
+# made-us 가 만들지 않는 것 / 명백한 오프타겟(수요가 커도 제외)
+_NOT_OURS = ("응원봉", "슬로건", "커피차", "커피창고", "커피숍", "창업", "서포트",
+             "시트지", "썬팅", "어닝", "현수막", "배너", "명함", "스티커")
+
+
+def is_our_product(kw: str) -> bool:
+    """made-us 제품군 키워드인가. 제품 토큰이 있고 '안 만드는 것'이 아니어야 한다."""
+    if any(x in kw for x in _NOT_OURS):
+        return False
+    return any(x in kw for x in _PRODUCT)
+
+
 # 상위 글 제목 형식 분류
 _LOCAL = re.compile(
     r"(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주"
@@ -131,7 +148,12 @@ def scan(seeds: list[str], max_candidates: int) -> None:
                 w = w.strip()
                 if 3 <= len(w) <= 20 and w not in cands:
                     cands[w] = -1
-        print(f"후보 {len(cands)}개 발굴(시드 {len(seeds)})")
+        dropped = [k for k in cands if not is_our_product(k)]
+        for k in dropped:
+            del cands[k]
+        print(f"후보 {len(cands)}개 발굴(시드 {len(seeds)}) — 제품 무관 {len(dropped)}개 제외")
+        if dropped:
+            print(f"  제외 예: {', '.join(dropped[:8])}")
 
         # 2) 수요 측정(자동완성 API — 가볍다)
         for kw in list(cands):
@@ -153,9 +175,21 @@ def scan(seeds: list[str], max_candidates: int) -> None:
                   f"온토픽{d['ontopic']}/{d['n']} 지역{d['local']} 정보{d['info']} → {sc}")
         ctx.close()
 
-    rows.sort(key=lambda r: -r["score"])
+    # 스캔 결과는 **누적**한다. 세그먼트별로 나눠 돌리므로 덮어쓰면 이전 진단이 사라진다
+    # (실제로 BJ 스캔이 간판 스캔을 지워 엔진의 지역형 페널티가 풀린 적 있음).
+    merged: dict[str, dict] = {}
+    if OUT.exists():
+        try:
+            for r in json.loads(OUT.read_text(encoding="utf-8")):
+                merged[r["keyword"]] = r
+        except Exception:
+            pass
+    for r in rows:
+        merged[r["keyword"]] = r
+    out = sorted(merged.values(), key=lambda r: -r["score"])
     OUT.parent.mkdir(exist_ok=True)
-    OUT.write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
+    OUT.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"\n누적 저장: {len(out)}개 키워드 (이번 스캔 {len(rows)}개)")
     _report(rows)
 
 

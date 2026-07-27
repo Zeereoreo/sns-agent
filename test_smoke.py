@@ -84,6 +84,14 @@ def t_parser():
     check("지역형 판은 강하게 할인", pen("노래방 간판") <= 0.35, pen("노래방 간판"))
     check("지역형 아닌 판은 유지", pen("네온사인") == 1.0, pen("네온사인"))
     check("모르는 키워드는 할인 없음", pen("존재하지않는키워드") == 1.0)
+
+    # 기회 발굴의 제품 적합성 게이트 — 자동완성이 동음이의어로 새는 것을 막는다
+    from opportunity import is_our_product
+    check("우리 제품 키워드 통과", is_our_product("응원 피켓") and is_our_product("LED 전광판"))
+    check("동음이의어 제외", not is_our_product("아치서포트") and not is_our_product("핀서포트"))
+    check("안 만드는 것 제외",
+          not is_our_product("응원봉") and not is_our_product("커피창고")
+          and not is_our_product("간판 시트지"))
     check("제목이 있다", d["title"] and d["title"] != "제목 없음")
     check("태그 5개 이상", len(d["tags"]) >= 5, f"tags={len(d['tags'])}")
     check("본문 text 블록이 # 로 시작하지 않음",
