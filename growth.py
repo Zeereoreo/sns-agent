@@ -284,6 +284,36 @@ def _research_penalty(kw: str, path: Path) -> float:
     return max(0.5, ratio)     # 0.9→0.9, 0.67→0.67, 0.5이하→하한 0.5
 
 
+OPPORTUNITIES = ROOT / "data" / "opportunities.json"
+
+
+def _serp_format_penalty(kw: str) -> float:
+    """SERP 상위가 '지역 + 시공 후기'로 채워진 키워드는 우리가 이길 수 없다 → 할인.
+
+    2026-07-27 실측: '노래방 간판'(수요6) 상위 10개 중 7개가 부산·목동·용산·수원·대전·창원
+    같은 **지역 시공 후기**였다. 우리 c38 이 30위 밖인 이유는 글이 부실해서가 아니라
+    검색 의도(내 지역 시공 사례)와 형식이 달라서였다. 실제 시공지를 모르는 우리는
+    그 형식을 정직하게 쓸 수 없으므로 아예 피하는 게 맞다.
+    `opportunity.py scan` 이 만든 data/opportunities.json 을 근거로 쓴다(없으면 할인 없음).
+    """
+    rows = _load(OPPORTUNITIES, [])
+    if not isinstance(rows, list):
+        return 1.0
+    for r in rows:
+        if r.get("keyword") != kw:
+            continue
+        n = r.get("n") or 0
+        if n < 5:                      # 표본이 적으면 판단 보류
+            return 1.0
+        ratio = (r.get("local") or 0) / n
+        if ratio >= 0.6:
+            return 0.3                 # 지역 시공후기 판 — 사실상 진입 불가
+        if ratio >= 0.35:
+            return 0.7
+        return 1.0
+    return 1.0
+
+
 def _winnability(kw: str, latest: dict) -> float:
     """승산 보정 0~1. 수요(자동완성)는 검색활동만 재고 '우리가 이길 수 있는지'는
     못 잰다. 그래서 우리 실측 순위를 승산 신호로 쓴다:
@@ -292,12 +322,13 @@ def _winnability(kw: str, latest: dict) -> float:
       - 미측정 = 아직 기회(발행해서 확인) → 할인 없음 1.0
     head term(아이스버킷·네온사인 등)은 수요는 높아도 30위 밖으로 드러나 여기서 걸린다.
     """
+    fmt = _serp_format_penalty(kw)
     if kw not in latest:
-        return 1.0
+        return 1.0 * fmt
     r = latest[kw]
     if isinstance(r, int) and r <= 10:
         return 1.0
-    return 0.35
+    return 0.35 * fmt
 
 
 def rank_queue() -> list[dict]:

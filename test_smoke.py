@@ -77,6 +77,13 @@ def t_parser():
     check("내부 링크가 나온다", len(rel) > 0, f"{rel}")
     check("내부 링크는 logNo URL", all(u.rstrip('/').split('/')[-1].isdigit() for _, u in rel))
     check("자기 글은 제외", all("c29" not in t for t, _ in rel))
+
+    # SERP 형식 페널티: 지역 시공후기 판은 피해야 한다(2026-07-27 실측 근거)
+    import growth
+    pen = growth._serp_format_penalty
+    check("지역형 판은 강하게 할인", pen("노래방 간판") <= 0.35, pen("노래방 간판"))
+    check("지역형 아닌 판은 유지", pen("네온사인") == 1.0, pen("네온사인"))
+    check("모르는 키워드는 할인 없음", pen("존재하지않는키워드") == 1.0)
     check("제목이 있다", d["title"] and d["title"] != "제목 없음")
     check("태그 5개 이상", len(d["tags"]) >= 5, f"tags={len(d['tags'])}")
     check("본문 text 블록이 # 로 시작하지 않음",
