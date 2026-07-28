@@ -74,12 +74,22 @@ def t_parser():
     # 사진 일관성(2026-07-27 사용자 지적 "사진들이 일관성이 없다")
     from publish.images import IMG_DIR, GROUP_MAX, _group_pool as _gp2, _imgs, PHOTO_DIR
     allpool = [p for p in _imgs(PHOTO_DIR) if p.parent == PHOTO_DIR]
-    check("묶음이 너무 크지 않다", max(len(g) for g in _gp2(allpool)) <= GROUP_MAX,
-          max(len(g) for g in _gp2(allpool)))
+    # 제품 라벨(_pNN_)이 붙은 묶음은 진짜 한 제품이라 커도 된다.
+    # 라벨이 없는 순번 묶음(_gNN_)만 GROUP_MAX 로 잘라야 한다.
+    seq_sizes = [len(g) for g in _gp2(allpool)
+                 if g and not re.search(r"_(p\d+)_", g[0].name)]
+    check("순번 묶음은 너무 크지 않다", max(seq_sizes) <= GROUP_MAX, max(seq_sizes))
     check("대표는 항상 실물 사진", picks[0].parent != IMG_DIR, picks[0].name)
     check("인포그래픽은 사이에 안 낀다",
           all(p.parent != IMG_DIR for p in picks[1:-1]),
           [p.name for p in picks if p.parent == IMG_DIR])
+
+    # a(BJ) 글은 눈으로 확인한 제품 라벨(_pNN_)로 한 제품만 쓴다
+    for dn in ("a18_streamer-goods.md", "a06_platform-picket-difference.md"):
+        pk, _ = pick_images(f"drafts/{dn}", 9, advance=False)
+        pids = {re.search(r"_(p\d+)_", p.name).group(1)
+                for p in pk if re.search(r"_(p\d+)_", p.name)}
+        check(f"{dn[:3]} 제품 1종", len(pids) == 1, f"{sorted(pids)}")
 
     # 내부 링크: json 임포트 누락으로 조용히 []를 반환하던 버그 잠금
     from publish.naver import related_links

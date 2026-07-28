@@ -89,16 +89,27 @@ def _group_pool(pool: list[Path]) -> list[list[Path]]:
     간판은 원본 글이 여러 매장 사례를 연달아 올려서 한 구간에 75장·26장씩 들어간다
     (= 서로 다른 간판이 뒤섞임). 그래서 큰 묶음은 GROUP_MAX 장씩 잘라 인접한 것끼리만 쓰게 한다.
     """
-    groups: dict[str, list[Path]] = {}
+    products: dict[str, list[Path]] = {}   # _pNN_ = 사람이 확인한 '같은 제품'
+    seqs: dict[str, list[Path]] = {}       # _gNN_ = 수확 순번 연속(제품 단위 아님)
+    singles: list[list[Path]] = []         # _x_ = 1~3장짜리 단품
     for p in sorted(pool, key=lambda x: x.name):
-        m = re.search(r"_(g\d+)_", p.name)
-        groups.setdefault(f"{p.name.split('_')[1]}_{m.group(1)}" if m else p.name, []).append(p)
-    out: list[list[Path]] = []
-    for k in sorted(groups):
-        g = groups[k]
+        seg_slug = p.name.split("_")[1]
+        mp = re.search(r"_(p\d+)_", p.name)
+        if mp:
+            products.setdefault(f"{seg_slug}_{mp.group(1)}", []).append(p)
+            continue
+        if "_x_" in p.name:
+            singles.append([p])
+            continue
+        mg = re.search(r"_(g\d+)_", p.name)
+        seqs.setdefault(f"{seg_slug}_{mg.group(1)}" if mg else p.name, []).append(p)
+
+    out: list[list[Path]] = [products[k] for k in sorted(products)]
+    for k in sorted(seqs):                 # 아직 제품 라벨이 없는 세그먼트는 길이로 잘라 쓴다
+        g = seqs[k]
         for i in range(0, len(g), GROUP_MAX):
             out.append(g[i:i + GROUP_MAX])
-    return out
+    return out + singles
 
 
 _CAPTION_FORMS = ("{} 제작 사례", "{} 실물 컷", "{} 설치 예시", "{} 디테일 컷")
