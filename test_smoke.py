@@ -101,13 +101,29 @@ def t_parser():
     # SERP 형식 페널티: 지역 시공후기 판은 피해야 한다(2026-07-27 실측 근거)
     import growth
     pen = growth._serp_format_penalty
+    # 실측 수요 0 = 검색 유입 없음 → 발행 슬롯 낭비. 미측정은 깎지 않는다.
+    zd = growth._zero_demand_penalty
+    check("수요 0 은 할인", zd("x", {"x": 0}) == 0.3)
+    check("수요 있으면 유지", zd("x", {"x": 3}) == 1.0)
+    check("미측정은 할인 없음", zd("x", {}) == 1.0)
+
     # 자기잠식: 같은 키워드로 여러 편을 올리면 서로 순위를 깎는다
     check("발행된 키워드는 할인", growth._cannibal_penalty("아이스버킷", {"아이스버킷"}) == 0.35)
     check("새 키워드는 할인 없음", growth._cannibal_penalty("오픈 네온사인", {"아이스버킷"}) == 1.0)
+    # 보장하는 것: 같은 키워드가 여럿이면 1등 외에는 반드시 할인이 붙는다.
+    # (절대 순위는 다른 신호에 따라 바뀔 수 있어 '상위 N에 없음'으로 검증하면 불안정하다.)
     qq = growth.rank_queue()
-    top_kws = [r["keyword"] for r in qq[:10] if r["keyword"]]
-    check("큐 상위 10에 중복 키워드 없음", len(top_kws) == len(set(top_kws)),
-          [k for k in top_kws if top_kws.count(k) > 1])
+    seen_k, undiscounted = set(), []
+    for r in qq:
+        k = r["keyword"]
+        if not k:
+            continue
+        if k in seen_k and not r["breakdown"].get("cannibal"):
+            undiscounted.append(r["name"])
+        seen_k.add(k)
+    check("중복 키워드는 모두 할인됨", not undiscounted, undiscounted)
+    check("연속 2편이 같은 키워드가 아님",
+          all(qq[i]["keyword"] != qq[i + 1]["keyword"] for i in range(min(4, len(qq) - 1))))
 
     check("지역형 판은 강하게 할인", pen("노래방 간판") <= 0.35, pen("노래방 간판"))
 

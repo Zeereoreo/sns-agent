@@ -331,6 +331,19 @@ def _winnability(kw: str, latest: dict) -> float:
     return 0.35 * fmt
 
 
+def _zero_demand_penalty(kw: str, dmap: dict) -> float:
+    """검색 수요가 **실측 0**이면 총점을 크게 깎는다.
+
+    2026-07-28 실측: b19(LED 폭죽 트레이)·b21(클럽 조형물) 같은 수요 0 초안이 큐 #4·#5 였다.
+    demand 점수는 0인데 세그먼트·SEO·탐색 점수가 자리를 채워준 탓이다.
+    수요 0 = 검색으로는 방문자가 오지 않는다 = 발행 슬롯 낭비.
+    단 **미측정(None)은 깎지 않는다** — 아직 기회일 수 있으므로 측정 뒤에 판단한다.
+    a(BJ) 글은 대부분 수요 0이지만 스케줄러의 BJ 쿼터가 별도로 하루 2편을 보장한다.
+    """
+    n = dmap.get(kw)
+    return 0.3 if isinstance(n, (int, float)) and n == 0 else 1.0
+
+
 def _cannibal_penalty(kw: str, published_kws: set) -> float:
     """같은 타깃 키워드로 이미 발행한 글이 있으면 할인(자기잠식 방지).
 
@@ -391,7 +404,8 @@ def rank_queue() -> list[dict]:
                 + w["explore"] * explore + w["diversity"] * diversity)
         fit = _fit_multiplier(kw)                      # 손님 우선순위(BJ/스트리머 우선)
         cann = _cannibal_penalty(kw, published_kws)    # 같은 키워드 중복 발행 방지
-        total = base * fit * cann
+        zero = _zero_demand_penalty(kw, dmap)          # 실측 수요 0 = 검색 유입 없음
+        total = base * fit * cann * zero
         rows.append({
             "name": p.name, "seg": seg, "keyword": kw,
             "score": round(total, 4),
