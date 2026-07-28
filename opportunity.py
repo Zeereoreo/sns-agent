@@ -203,6 +203,66 @@ def _report(rows: list[dict]) -> None:
     print("※ 온토픽이 적을수록 그 키워드를 정조준한 글이 없다는 뜻(빈틈).")
 
 
+def retarget() -> None:
+    """승산 없는 초안을 찾아 '어떤 키워드로 바꾸면 되는지' 후보를 제안한다.
+
+    콘텐츠를 아무리 다듬어도 못 이기는 판이 있다 — 지역 시공후기 판, 실측 수요 0,
+    같은 키워드 중복. 이런 초안은 **글이 아니라 타깃을 바꿔야** 산다.
+    사람이 매번 판단하지 않아도 되게 목록으로 뽑아준다.
+    """
+    import re as _re
+
+    import growth  # noqa: PLC0415
+
+    rows = json.loads(OUT.read_text(encoding="utf-8")) if OUT.exists() else []
+    opp = {r["keyword"]: r for r in rows}
+    dmap = growth._demand_map()
+    q = growth.rank_queue()
+
+    # 이미 발행된 키워드(중복 판정용)
+    pub_kw = set()
+    state = json.loads((ROOT / "data" / "publish_state.json").read_text(encoding="utf-8"))
+    for n in state.get("published", []):
+        p = ROOT / "drafts" / n
+        if p.exists():
+            m = _re.search(r"타깃\s*검색키워드[^:]*:\s*(.+)", p.read_text(encoding="utf-8"))
+            if m:
+                pub_kw.add(_re.split(r"[,/·\n]", m.group(1).strip())[0].strip())
+
+    stuck = []
+    for r in q:
+        kw, reasons = r["keyword"], []
+        o = opp.get(kw)
+        if o and o.get("n", 0) >= 5 and (o.get("local", 0) / o["n"]) >= 0.6:
+            reasons.append(f"지역 시공후기 판({o['local']}/{o['n']})")
+        # a(BJ/스트리머)는 수요 0 이 정상이다 — 검색 유입이 아니라 진열·전환용이고
+        # 스케줄러 BJ 쿼터로 발행된다(사용자 최우선 세그먼트). 리타겟 대상이 아니다.
+        if dmap.get(kw) == 0 and r["seg"] != "a":
+            reasons.append("실측 수요 0")
+        if kw in pub_kw:
+            reasons.append("이미 같은 키워드로 발행함")
+        if reasons:
+            stuck.append((r["name"], kw, reasons))
+
+    # 제안 후보: 기회점수 상위 & 아직 아무 초안도 안 쓰는 키워드
+    # ★제품 게이트를 여기서도 건다 — 게이트 도입 전에 저장된 동음이의어(아치서포트·커피차 등)가
+    #   파일에 남아 있어서, 읽을 때도 걸러야 엉뚱한 주제를 제안하지 않는다.
+    used = {r["keyword"] for r in q} | pub_kw
+    free = [r for r in rows
+            if r["keyword"] not in used and r.get("score", 0) > 0.3
+            and is_our_product(r["keyword"])]
+    free.sort(key=lambda r: -r["score"])
+
+    print(f"=== 타깃을 바꿔야 할 초안 {len(stuck)}편 ===")
+    for name, kw, reasons in stuck:
+        print(f"  {name[:30]:32} '{kw}' — {', '.join(reasons)}")
+    print(f"\n=== 비어 있는 기회 키워드 상위 {min(8, len(free))}개 ===")
+    for r in free[:8]:
+        print(f"  {r['score']:>5}  수요{r['demand']:>3}  온토픽{r['ontopic']}/{r['n']}  {r['keyword']}")
+    if not free:
+        print("  (없음 — opportunity.py scan 으로 후보를 더 발굴하세요)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -210,8 +270,12 @@ def main() -> None:
     sc.add_argument("--seeds", default=None, help="쉼표 구분(기본: 제품 시드)")
     sc.add_argument("--max", type=int, default=20, help="SERP 진단할 후보 수")
     sub.add_parser("report")
+    sub.add_parser("retarget")
     a = ap.parse_args()
 
+    if a.cmd == "retarget":
+        retarget()
+        return
     if a.cmd == "report":
         if not OUT.exists():
             print("아직 scan 결과가 없습니다.")
