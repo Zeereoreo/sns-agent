@@ -753,6 +753,36 @@ def page_growth(d) -> str:
                   f"<td><a href='/post?file={e(r['name'])}'>{e(r['name'])}</a></td>"
                   f"<td class='muted'>{e(r['keyword'])}</td>"
                   f"<td class='muted'>세그{b['seg']} · SEO{b['seo']} · 탐색{b['explore']} · 폭{b['diversity']}</td></tr>")
+    # 기회·리타겟 — "다음에 뭘 써야 하나"를 화면에서 보게 한다(도구 결과가 안 보이면 없는 것과 같다)
+    opp_html = ""
+    try:
+        import json as _j
+
+        from opportunity import OUT as _OPP
+        from opportunity import is_our_product as _mine
+        rows = _j.loads(_OPP.read_text(encoding="utf-8")) if _OPP.exists() else []
+        used = {r["keyword"] for r in q}
+        free = sorted((r for r in rows
+                       if r["keyword"] not in used and r.get("score", 0) > 0.3
+                       and _mine(r["keyword"])),
+                      key=lambda r: -r["score"])[:8]
+        if free:
+            frows = "".join(
+                f"<tr><td>{r['score']}</td><td>{r['demand']}</td>"
+                f"<td>{r['ontopic']}/{r['n']}</td><td>{r['local']}</td>"
+                f"<td>{e(r['keyword'])}</td></tr>" for r in free)
+            opp_html = (
+                "<div class='panel'><div class='ptit'>비어 있는 기회 키워드 "
+                "(SERP 실측 · 아직 아무 초안도 안 쓰는 것)</div>"
+                "<table><tr><th>기회</th><th>수요</th><th>온토픽</th><th>지역</th>"
+                f"<th>키워드</th></tr>{frows}</table>"
+                "<div class='muted' style='margin-top:6px'>온토픽이 낮을수록 그 키워드를 "
+                "정조준한 글이 없다는 뜻(빈틈). 지역 수가 크면 '지역+시공후기' 판이라 "
+                "실제 시공지를 모르면 정직하게 쓸 수 없습니다 — 피하세요. "
+                "갱신: <code>python opportunity.py scan</code> (발행 후 주 1회 자동)</div></div>")
+    except Exception as ex:
+        opp_html = f"<div class='panel muted'>기회 데이터 로드 실패: {e(str(ex))}</div>"
+
     tune_html = ""
     if tlog:
         rows = "".join(
@@ -781,6 +811,7 @@ def page_growth(d) -> str:
         + f"<div class='panel'><div class='ptit'>현재 가중치 (자가 튜닝됨)</div><div>{wrow}</div>"
         + f"<div class='muted' style='margin-top:6px'>다음 추천 발행: <b>{e(str(nxt))}</b> "
         + "(⭐ 표시). 세그먼트 3연속은 자동 회피.</div></div>"
+        + opp_html
         + "<h2>발행 우선순위 (성장 점수순)</h2>"
         + "<div class=scroll><table><tr><th>점수</th><th>세그</th><th>초안</th>"
         + f"<th>키워드</th><th>점수 근거</th></tr>{qrows}</table></div>"
