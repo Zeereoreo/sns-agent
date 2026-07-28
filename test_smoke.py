@@ -101,6 +101,14 @@ def t_parser():
     # SERP 형식 페널티: 지역 시공후기 판은 피해야 한다(2026-07-27 실측 근거)
     import growth
     pen = growth._serp_format_penalty
+    # 자기잠식: 같은 키워드로 여러 편을 올리면 서로 순위를 깎는다
+    check("발행된 키워드는 할인", growth._cannibal_penalty("아이스버킷", {"아이스버킷"}) == 0.35)
+    check("새 키워드는 할인 없음", growth._cannibal_penalty("오픈 네온사인", {"아이스버킷"}) == 1.0)
+    qq = growth.rank_queue()
+    top_kws = [r["keyword"] for r in qq[:10] if r["keyword"]]
+    check("큐 상위 10에 중복 키워드 없음", len(top_kws) == len(set(top_kws)),
+          [k for k in top_kws if top_kws.count(k) > 1])
+
     check("지역형 판은 강하게 할인", pen("노래방 간판") <= 0.35, pen("노래방 간판"))
     check("지역형 아닌 판은 유지", pen("네온사인") == 1.0, pen("네온사인"))
     check("모르는 키워드는 할인 없음", pen("존재하지않는키워드") == 1.0)

@@ -331,6 +331,16 @@ def _winnability(kw: str, latest: dict) -> float:
     return 0.35 * fmt
 
 
+def _cannibal_penalty(kw: str, published_kws: set) -> float:
+    """같은 타깃 키워드로 이미 발행한 글이 있으면 할인(자기잠식 방지).
+
+    2026-07-28 실측: 초안 44편이 35종 키워드를 쓰는데 **'아이스버킷' 하나에 7편**이 몰려 있었다.
+    같은 키워드로 여러 편을 올리면 네이버가 어느 글을 대표로 볼지 흐려져 서로 순위를 깎아먹는다.
+    이미 그 키워드로 발행한 글이 있으면 새 글보다 **그 글을 키우는 게** 낫다.
+    """
+    return 0.35 if kw and kw in published_kws else 1.0
+
+
 def rank_queue() -> list[dict]:
     """미발행 초안 전부를 우선순위 점수와 함께 정렬해 반환(설명 포함)."""
     w = load_weights()
@@ -353,6 +363,15 @@ def rank_queue() -> list[dict]:
         rem_per_seg[_segment(p.name)] += 1
     max_rem = max(rem_per_seg.values()) or 1
 
+    # 이미 발행한 글들의 타깃 키워드 — 같은 키워드를 또 쓰면 서로 잡아먹는다
+    published_kws = set()
+    for n in published:
+        pp = DRAFTS / n
+        if pp.exists():
+            k = primary_keyword(pp)
+            if k:
+                published_kws.add(k)
+
     rows = []
     for p in unpub:
         seg = _segment(p.name)
@@ -371,7 +390,8 @@ def rank_queue() -> list[dict]:
         base = (w["demand"] * demand_s + w["seg"] * seg_s + w["seo"] * seo_s
                 + w["explore"] * explore + w["diversity"] * diversity)
         fit = _fit_multiplier(kw)                      # 손님 우선순위(BJ/스트리머 우선)
-        total = base * fit
+        cann = _cannibal_penalty(kw, published_kws)    # 같은 키워드 중복 발행 방지
+        total = base * fit * cann
         rows.append({
             "name": p.name, "seg": seg, "keyword": kw,
             "score": round(total, 4),
@@ -379,6 +399,19 @@ def rank_queue() -> list[dict]:
                           "seo": round(seo_s, 2), "explore": round(explore, 2),
                           "diversity": round(diversity, 2), "fit": round(fit, 2)},
         })
+    rows.sort(key=lambda r: r["score"], reverse=True)
+    # 큐 안에서도 같은 키워드가 겹치면 1등만 남기고 나머지는 할인한다.
+    # (아직 아무것도 발행 안 한 키워드라도 두 편을 연달아 올리면 똑같이 자기잠식이다.)
+    seen_kw: set = set()
+    for r in rows:
+        k = r["keyword"]
+        if not k:
+            continue
+        if k in seen_kw:
+            r["score"] = round(r["score"] * 0.35, 4)
+            r["breakdown"]["cannibal"] = 0.35
+        else:
+            seen_kw.add(k)
     rows.sort(key=lambda r: r["score"], reverse=True)
     return rows
 
