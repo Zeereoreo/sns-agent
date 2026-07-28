@@ -34,15 +34,27 @@ def _title_ok(t: str, kw: str) -> bool:
     return sum(1 for w in toks if w in t) >= max(1, len(toks) - 1)
 
 
+TITLE_GOOGLE_MAX = 30   # 구글 SERP 가 한글 제목을 자르는 지점(대략)
+
+
 def _choose_title(cands: list[str], kw: str, name: str) -> str:
-    """초안 파일명 기반 결정론적 선택(프로세스 재시작해도 동일). 후보2 안전할 때만 로테이션."""
+    """초안 파일명 기반 결정론적 선택(프로세스 재시작해도 동일). 후보2 안전할 때만 로테이션.
+
+    ★짧은 후보 우선: 구글 검색결과는 한글 제목을 30자쯤에서 자른다. 짧은 후보가 있는데
+    로테이션이 긴 후보를 고르면 그 발행분만 구글에서 제목이 잘린다(2026-07-28 a13 에서 발견 —
+    H1 은 13자인데 로테이션이 32자짜리 후보2를 쓰고 있었다).
+    30자 이하 후보가 하나라도 있으면 그 안에서만 로테이션한다.
+    """
     if not cands:
         return "제목 없음"
-    if len(cands) < 2 or not _title_ok(cands[1], kw):
-        return cands[0]
+    usable = [c for c in cands if _title_ok(c, kw)] or cands
+    short = [c for c in usable if len(c) <= TITLE_GOOGLE_MAX]
+    pool = short or usable
+    if len(pool) < 2:
+        return pool[0]
     # 안정적 해시(파이썬 hash는 프로세스마다 달라 사용 불가)
     h = sum(ord(c) for c in Path(name).name)
-    return cands[h % 2]
+    return pool[h % len(pool)]
 
 
 def parse_draft(path: str | Path) -> dict:

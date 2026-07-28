@@ -111,6 +111,13 @@ def t_parser():
 
     check("지역형 판은 강하게 할인", pen("노래방 간판") <= 0.35, pen("노래방 간판"))
 
+    # 제목 로테이션은 짧은 후보를 우선한다(구글 SERP 30자 컷)
+    from publish.draft_parser import _choose_title
+    short, long_ = "짧은 제목 피켓", "아주 길게 늘어놓은 방송용 피켓 제목 후보 예시입니다 정말 길죠"
+    picked = {_choose_title([short, long_], "피켓", f"x{i}.md") for i in range(6)}
+    check("긴 후보 대신 짧은 후보만", picked == {short}, picked)
+    check("짧은 후보 없으면 그대로", _choose_title([long_], "피켓", "y.md") == long_)
+
     # 세션 만료 사전 경고: 죽고 나서가 아니라 미리 알아야 발행이 안 멈춘다
     import metrics as _m
     check("만료 사전경고 기준", _m.SESSION_WARN_DAYS >= 7, _m.SESSION_WARN_DAYS)
