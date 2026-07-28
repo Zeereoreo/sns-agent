@@ -94,6 +94,34 @@ LOCK_STALE_SEC = 25 * 60   # 이보다 오래된 락은 죽은 프로세스로 �
 ALERT_AFTER = 2   # 연속 실패가 이 횟수 이상이면 바탕화면 경고를 남긴다
 
 
+FAIL_SKIP_AFTER = 3
+# 초안과 무관한 실패 이유 — 이건 그 초안 탓이 아니므로 카운트하지 않는다
+_NOT_DRAFT_FAULT = {"session_expired", "dry_run", None, ""}
+
+
+def _repeatedly_failing(log: list, published: set) -> set:
+    """자기 문제로 FAIL_SKIP_AFTER 회 이상 연속 실패한 초안 집합.
+
+    세션 만료처럼 전체가 막히는 원인은 제외한다. 그런 걸 초안 탓으로 세면
+    멀쩡한 초안이 통째로 건너뛰어진다. 이미지 삽입 실패·본문 실패·예외만 센다.
+    성공하면 카운트가 초기화된다.
+    """
+    streak: dict[str, int] = {}
+    for e in log:
+        if e.get("dry"):
+            continue
+        name = e.get("draft")
+        if not name:
+            continue
+        if e.get("ok"):
+            streak[name] = 0
+            continue
+        if str(e.get("reason")) in _NOT_DRAFT_FAULT:
+            continue
+        streak[name] = streak.get(name, 0) + 1
+    return {n for n, c in streak.items() if c >= FAIL_SKIP_AFTER and n not in published}
+
+
 def _consecutive_failures(log: list) -> int:
     """마지막 실제 실행부터 거꾸로 센 연속 실패 횟수(dry-run 은 제외)."""
     n = 0
@@ -167,12 +195,21 @@ def _run(dry_run: bool = True) -> None:
         print(f"오늘 발행 상한({config.MAX_POSTS_PER_DAY}) 도달. 종료.")
         return
 
+    # 특정 초안이 자기 문제로 계속 실패하면 큐가 그 자리에서 막힌다(무한 재시도).
+    # 세션 만료처럼 초안과 무관한 실패는 제외하고, 그 초안 고유 실패만 센다.
+    blocked = _repeatedly_failing(s["log"], published)
+    if blocked:
+        print(f"[건너뜀] 자기 문제로 {FAIL_SKIP_AFTER}회 이상 실패한 초안: {', '.join(blocked)}")
+
     # 발행 순서 = 성장 엔진이 성과 데이터로 정한 우선순위. 실패 시 기존 인터리브로 폴백.
     nxt = None
     try:
         import growth  # noqa: PLC0415
-        pick = growth.next_draft()
-        if pick and (DRAFTS / pick).exists() and pick not in published:
+        pick = growth.next_draft()          # 세그먼트 3연속 회피 로직 포함
+        if pick in blocked:                 # 막힌 초안이면 그다음 후보로
+            pick = next((r["name"] for r in growth.rank_queue()
+                         if r["name"] not in blocked and (DRAFTS / r["name"]).exists()), None)
+        if pick and pick not in published:
             nxt = DRAFTS / pick
             print(f"[성장엔진] 다음 발행 선택: {pick}")
     except Exception as e:
