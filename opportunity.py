@@ -148,6 +148,16 @@ def scan(seeds: list[str], max_candidates: int) -> None:
                 w = w.strip()
                 if 3 <= len(w) <= 20 and w not in cands:
                     cands[w] = -1
+        # ★띄어쓰기 변형을 자동으로 같이 잰다.
+        # 같은 뜻인데 경쟁 밀도가 완전히 다르다(2026-07-28 실측):
+        #   '메뉴판 제작' 온토픽 8/10 vs '메뉴판제작' 0/10
+        #   '입간판' 10/10 vs '입간판제작' 1/10 · '아크릴 간판' 9/10 vs '아크릴간판' 4/10
+        # 붙여쓴 형태를 빠뜨리면 최대 빈틈을 놓친다.
+        for w in list(cands):
+            joined = w.replace(" ", "")
+            if joined != w and 3 <= len(joined) <= 20 and joined not in cands:
+                cands[joined] = -1
+
         dropped = [k for k in cands if not is_our_product(k)]
         for k in dropped:
             del cands[k]

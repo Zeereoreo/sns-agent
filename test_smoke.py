@@ -157,7 +157,7 @@ def t_parser():
     check("모르는 키워드는 할인 없음", pen("존재하지않는키워드") == 1.0)
 
     # 기회 발굴의 제품 적합성 게이트 — 자동완성이 동음이의어로 새는 것을 막는다
-    from opportunity import is_our_product
+    from opportunity import _serp, is_our_product  # noqa: F401  (_serp 존재 확인용)
     check("우리 제품 키워드 통과", is_our_product("응원 피켓") and is_our_product("LED 전광판"))
     check("동음이의어 제외", not is_our_product("아치서포트") and not is_our_product("핀서포트"))
     check("안 만드는 것 제외",
