@@ -81,9 +81,22 @@ def login():
                 break
             except Exception:
                 continue
+        # 눌렀다고 켜진 게 아니다 — 실제 체크 상태를 확인해서 안 켜졌으면 크게 알린다.
+        keep_on = None
+        try:
+            keep_on = page.evaluate("""() => {
+                const el = document.querySelector('#keep, input[name=nvlong], input[id*=keep]');
+                return el ? (el.checked || el.value === 'on') : null;
+            }""")
+        except Exception:
+            pass
         print("=" * 60)
         print(" 열린 크롬 창에서 네이버(made-us2)에 직접 로그인하세요. (2차 인증 포함)")
-        print(" ※ '로그인 상태 유지'가 켜져 있는지 확인하세요(자동으로 켜뒀습니다).")
+        if keep_on:
+            print(" ※ '로그인 상태 유지' 자동으로 켜뒀습니다.")
+        else:
+            print(" ⚠ '로그인 상태 유지'를 자동으로 못 켰습니다 — **직접 켜고** 로그인하세요.")
+            print("   안 켜면 인증 쿠키가 세션쿠키로 저장돼 하루 안에 발행이 전부 실패합니다.")
         print(" 로그인되면 자동 감지해 세션을 저장하고 창을 닫습니다. (최대 6분 대기)")
         print(" 로그인 끝날 때까지 창을 닫지 마세요.")
         print("=" * 60)
@@ -104,20 +117,35 @@ def login():
         if saved:
             page.wait_for_timeout(1500)  # 쿠키 flush 여유
         ctx.close()
-        # 저장 검증: 새 컨텍스트로 열어 NID_AUT/NID_SES 가 디스크에 남았는지 확인
+        # 저장 검증: 쿠키가 '있는지'가 아니라 **영속 쿠키인지**(만료 시각이 미래인지) 본다.
+        # 세션 쿠키(expires=-1)면 브라우저가 닫히는 순간 사라져 다음 발행이 통째로 실패한다.
+        # 2026-07-28: '있는지'만 확인하고 OK 를 띄웠다가 하루 만에 NID_AUT/NID_SES 가 사라져
+        # 예약 발행이 전부 죽었다. 그래서 만료 시각까지 확인하고 출력한다.
         persisted = False
+        detail = ""
         if saved:
             c2 = launch_context(p, headed=False)
             try:
-                names = {c.get("name") for c in c2.cookies()
-                         if "naver" in (c.get("domain") or "")}
-                persisted = bool({"NID_AUT", "NID_SES"} & names)
+                auth = [c for c in c2.cookies()
+                        if c.get("name") in ("NID_AUT", "NID_SES")
+                        and "naver" in (c.get("domain") or "")]
+                lasting = [c for c in auth if (c.get("expires") or -1) > 0]
+                persisted = len(lasting) >= 2
+                if auth:
+                    import datetime
+                    detail = " / ".join(
+                        f"{c['name']}="
+                        + ("세션쿠키" if (c.get("expires") or -1) <= 0 else
+                           datetime.datetime.fromtimestamp(c["expires"]).strftime("%Y-%m-%d"))
+                        for c in auth)
             finally:
                 c2.close()
     if persisted:
-        print("[OK] 로그인 세션 저장·검증 완료 (user_data/). publish 실행 가능.")
+        print(f"[OK] 로그인 세션 저장·검증 완료 — 만료: {detail}")
     elif saved:
-        print("[!] 로그인은 됐으나 세션 미저장 - 로그인 창의 '로그인 상태 유지'를 켜고 다시 로그인하세요.")
+        print(f"[!] 로그인은 됐으나 **영속 저장 안 됨**({detail or '인증 쿠키 없음'}).")
+        print("    로그인 창의 '로그인 상태 유지'를 켜고 다시 로그인하세요. "
+              "이대로 두면 하루 안에 발행이 다시 실패합니다.")
     else:
         print("[!] 로그인 감지 안 됨 - 다시 실행해 로그인해 주세요.")
 
