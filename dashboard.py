@@ -863,7 +863,24 @@ def run_diagnostics(d) -> list[dict]:
     if sv is None:
         add("네이버 세션", "warn", "점검 데이터 없음(다음 수집 시 생성)")
     elif sv.get("ok"):
-        add("네이버 세션", "ok", f"정상 ({sv.get('checked','')})")
+        # 만료일까지 보여준다 — '지금 정상'만으로는 내일 죽는 걸 못 막는다.
+        exp = sv.get("expires")
+        if "expires" not in sv:          # 만료일 측정 전(옛 기록) — 아직 판단하지 않는다
+            add("네이버 세션", "ok", f"정상 ({sv.get('checked','')}) · 만료일 미측정")
+        elif not exp:
+            add("네이버 세션", "warn", "정상이나 **영속 쿠키 아님**(곧 만료)",
+                "'로그인 상태 유지'를 켜고 다시 로그인")
+        else:
+            try:
+                from datetime import date as _d
+                left = (_d.fromisoformat(exp) - _d.today()).days
+            except Exception:
+                left = None
+            if left is not None and left <= 7:
+                add("네이버 세션", "warn", f"{left}일 뒤 만료({exp})", "미리 재로그인 권장")
+            else:
+                add("네이버 세션", "ok",
+                    f"정상 ({sv.get('checked','')})" + (f" · 만료 {exp}" if exp else ""))
     else:
         add("네이버 세션", "bad", "만료됨", "python -m publish.naver login")
 
@@ -911,6 +928,45 @@ def run_diagnostics(d) -> list[dict]:
         add("사진 풀", "warn", f"세그먼트 {','.join(missing)} 사진 없음 (a{segs['a']}/b{segs['b']}/c{segs['c']})")
     else:
         add("사진 풀", "ok", f"a{segs['a']} · b{segs['b']} · c{segs['c']} · 인박스{img['inbox']}")
+
+    # 6-2) 콘텐츠 품질(전환 게이트) — 구체 수치·실답변이 없는 글은 순위가 안 오른다
+    try:
+        import growth as _g
+        import seo as _s
+        q = _g.rank_queue()
+        miss = [r["name"] for r in q
+                if not [c for c in _s.score_draft(ROOT / "drafts" / r["name"])["checks"]
+                        if c["name"] == "conversion"][0]["ok"]]
+        if not q:
+            pass
+        elif len(miss) > len(q) * 0.5:
+            add("콘텐츠 전환 게이트", "warn",
+                f"{len(miss)}/{len(q)}편 미달(구체 수치·회피 답변)", "상위 초안부터 보완")
+        else:
+            add("콘텐츠 전환 게이트", "ok", f"{len(q) - len(miss)}/{len(q)}편 통과")
+    except Exception as ex:
+        add("콘텐츠 전환 게이트", "warn", f"점검 실패: {ex}")
+
+    # 6-3) 자기잠식 — 같은 키워드 초안이 여럿이면 서로 순위를 깎는다
+    try:
+        import collections as _c
+        import re as _re
+        kws = _c.Counter()
+        for p in scheduler._ordered_drafts():
+            m = _re.search(r"타깃\s*검색키워드[^:]*:\s*(.+)", p.read_text(encoding="utf-8"))
+            k = _re.split(r"[,/·\n]", m.group(1).strip())[0].strip() if m else ""
+            if k:
+                kws[k] += 1
+        dup = {k: v for k, v in kws.items() if v > 1}
+        if dup:
+            top = sorted(dup.items(), key=lambda kv: -kv[1])[:2]
+            add("키워드 중복", "warn",
+                " · ".join(f"'{k}' {v}편" for k, v in top) + f" (총 {len(dup)}종)",
+                "엔진이 자동 할인하지만 리타겟이 근본 해결")
+        else:
+            add("키워드 중복", "ok", "중복 타겟 없음")
+    except Exception as ex:
+        add("키워드 중복", "warn", f"점검 실패: {ex}")
 
     # 7) 상태 파일
     ok_state = (ROOT / "data" / "publish_state.json").exists()

@@ -111,6 +111,11 @@ def t_parser():
 
     check("지역형 판은 강하게 할인", pen("노래방 간판") <= 0.35, pen("노래방 간판"))
 
+    # 세션 만료 사전 경고: 죽고 나서가 아니라 미리 알아야 발행이 안 멈춘다
+    import metrics as _m
+    check("만료 사전경고 기준", _m.SESSION_WARN_DAYS >= 7, _m.SESSION_WARN_DAYS)
+    check("만료일 조회 함수", callable(_m._session_expiry) and callable(_m._warn_session_soon))
+
     # 기회 스캔은 주 1회만 — 매 발행마다 SERP 를 수십 번 긁지 않게
     import scheduler as sch
     check("주간 스캔 주기 설정", sch.OPP_EVERY_DAYS >= 7, sch.OPP_EVERY_DAYS)

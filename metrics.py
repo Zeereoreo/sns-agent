@@ -137,6 +137,43 @@ def _session_ok(page, blog: str) -> bool | None:
     return None
 
 
+SESSION_WARN_DAYS = 7
+
+
+def _session_expiry(ctx) -> str | None:
+    """인증 쿠키(NID_AUT/NID_SES)의 만료일. 영속이 아니면 None.
+
+    세션이 죽고 나서야 아는 구조라 2026-07-25~28 에 발행 4일을 날렸다.
+    만료일을 미리 알면 죽기 전에 갱신할 수 있다.
+    """
+    try:
+        exps = [c.get("expires") for c in ctx.cookies()
+                if c.get("name") in ("NID_AUT", "NID_SES")
+                and "naver" in (c.get("domain") or "")
+                and (c.get("expires") or -1) > 0]
+        if not exps:
+            return None
+        return date.fromtimestamp(min(exps)).isoformat()
+    except Exception:
+        return None
+
+
+def _warn_session_soon(expires: str, days_left: int) -> None:
+    """만료가 가까우면 미리 알린다(죽고 나서가 아니라)."""
+    try:
+        import notify  # noqa: PLC0415
+        notify.notify("SNS Agent 세션 만료 임박",
+                      f"네이버 세션이 {days_left}일 뒤({expires}) 만료됩니다 — 미리 재로그인하세요.")
+        notify.write_alert(
+            f"네이버 세션이 {days_left}일 뒤 만료됩니다(만료일 {expires}).\n"
+            f"아직 발행은 되지만, 만료되면 예약 발행이 전부 실패합니다.\n\n"
+            f"  cd {ROOT}\n"
+            f"  .\\.venv\\Scripts\\python.exe publish\\naver.py login\n\n"
+            f"로그인 창에서 '로그인 상태 유지'를 반드시 체크하세요.\n")
+    except Exception as e:
+        print("만료 임박 알림 실패:", e)
+
+
 def _external_indexed(page, blog: str) -> int | None:
     """네이버 밖 검색엔진에 우리 글이 몇 편이나 색인됐는지.
 
@@ -230,10 +267,22 @@ def collect(force_ranks: bool = False) -> dict:
         # (하루 1회만 하던 때는 07-27 09:14 에 만료를 기록해두고도 아무도 몰랐다.)
         so = _session_ok(page, blog)
         if so is not None:
-            data["session"] = {"ok": so, "checked": f"{today} {datetime.now():%H:%M}"}
-            print(f"[세션] {'정상' if so else '만료 — 재로그인 필요'}")
+            exp = _session_expiry(ctx)
+            data["session"] = {"ok": so, "checked": f"{today} {datetime.now():%H:%M}",
+                               "expires": exp}
+            print(f"[세션] {'정상' if so else '만료 — 재로그인 필요'}"
+                  + (f" / 쿠키 만료 {exp}" if exp else " / 영속 쿠키 아님(곧 죽음)"))
             if not so:
                 _warn_session_expired(today)
+            elif exp:
+                left = (date.fromisoformat(exp) - date.today()).days
+                if left <= SESSION_WARN_DAYS:
+                    print(f"[세션] ⚠ {left}일 뒤 만료 — 미리 알림")
+                    _warn_session_soon(exp, left)
+            else:
+                # 로그인은 됐지만 세션쿠키라 하루 안에 죽는다 — 이걸 미리 잡아야 한다
+                print("[세션] ⚠ 영속 쿠키 없음 — '로그인 상태 유지' 없이 로그인된 상태")
+                _warn_session_soon("영속 아님", 0)
 
         ctx.close()
 
