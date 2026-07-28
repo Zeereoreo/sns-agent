@@ -93,8 +93,10 @@ def _conversion_signals(text: str, body: str) -> tuple[int, int]:
     """(구체 수치 문장 수, 회피성 답변 수). 구매 결정을 돕는 정보가 실제로 있는지 본다."""
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n", body) if s.strip()]
     spec = sum(1 for s in sentences
-               if re.search(r"\d+\s*(cm|mm|호|일|주|개월|년|만원|원|시간|분|W|V|%|장|개|kg"
-                            r"|가지|자|도|단계|중|배|회|종|명|평)", s))
+               # '층'·'m'(미터)은 간판 글에서 가장 흔한 구체 정보인데 빠져 있었다.
+               # 단위가 빠지면 실제로는 구체적인 글이 미달로 나와, 없는 수치를 더 넣게 만든다.
+               if re.search(r"\d+\s*(cm|mm|m(?![a-zA-Z])|호|층|일|주|개월|년|만원|원|시간|분"
+                            r"|W|V|%|장|개|kg|가지|자|도|단계|중|배|회|종|명|평|위)", s))
     dodge = len(_DODGE.findall(text))
     return spec, dodge
 
