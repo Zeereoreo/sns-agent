@@ -146,12 +146,15 @@ def t_parser():
     check("수요 갱신도 주간", sch.DEMAND_EVERY_DAYS >= 7 and callable(sch._audit_demand_weekly))
 
     # 자기 문제로 반복 실패하는 초안은 건너뛴다(큐가 그 자리에서 막히지 않게)
-    bad3 = [{"draft": "x.md", "ok": False, "reason": "images_failed"}] * 3
-    check("3회 실패면 건너뜀", sch._repeatedly_failing(bad3, set()) == {"x.md"})
-    sess = [{"draft": "x.md", "ok": False, "reason": "session_expired"}] * 5
+    real = "a19_led-picket-diy-vs-order.md"      # 실제로 존재하는 초안으로 검증
+    bad3 = [{"draft": real, "ok": False, "reason": "images_failed"}] * 3
+    check("3회 실패면 건너뜀", sch._repeatedly_failing(bad3, set()) == {real})
+    sess = [{"draft": real, "ok": False, "reason": "session_expired"}] * 5
     check("세션 만료는 초안 탓 아님", sch._repeatedly_failing(sess, set()) == set())
-    mixed = bad3 + [{"draft": "x.md", "ok": True}]
+    mixed = bad3 + [{"draft": real, "ok": True}]
     check("성공하면 초기화", sch._repeatedly_failing(mixed, set()) == set())
+    ghost = [{"draft": "(전체 삭제)", "ok": False, "reason": "images_failed"}] * 5
+    check("없는 초안은 무시", sch._repeatedly_failing(ghost, set()) == set())
 
     # 주기 판정: 기록 없으면 '오래됨', 오늘 기록이면 '아님'
     import tempfile as _tf

@@ -119,7 +119,9 @@ def _repeatedly_failing(log: list, published: set) -> set:
         if str(e.get("reason")) in _NOT_DRAFT_FAULT:
             continue
         streak[name] = streak.get(name, 0) + 1
-    return {n for n, c in streak.items() if c >= FAIL_SKIP_AFTER and n not in published}
+    # 실제로 존재하는 초안만 — 옛 로그에는 '(전체 삭제)' 같은 항목이 남아 있다
+    return {n for n, c in streak.items()
+            if c >= FAIL_SKIP_AFTER and n not in published and (DRAFTS / n).exists()}
 
 
 def _consecutive_failures(log: list) -> int:
