@@ -110,6 +110,11 @@ def t_parser():
           [k for k in top_kws if top_kws.count(k) > 1])
 
     check("지역형 판은 강하게 할인", pen("노래방 간판") <= 0.35, pen("노래방 간판"))
+
+    # 기회 스캔은 주 1회만 — 매 발행마다 SERP 를 수십 번 긁지 않게
+    import scheduler as sch
+    check("주간 스캔 주기 설정", sch.OPP_EVERY_DAYS >= 7, sch.OPP_EVERY_DAYS)
+    check("스캔 함수 존재", callable(sch._scan_opportunities_weekly))
     check("지역형 아닌 판은 유지", pen("네온사인") == 1.0, pen("네온사인"))
     check("모르는 키워드는 할인 없음", pen("존재하지않는키워드") == 1.0)
 

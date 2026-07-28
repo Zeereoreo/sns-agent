@@ -312,6 +312,34 @@ def _run(dry_run: bool = True) -> None:
         except Exception as e:
             print("경쟁 분석 건너뜀:", e)
 
+        # 기회 키워드 재스캔(주 1회) — 새 기회를 사람이 손으로 찾지 않아도 되게.
+        # SERP 형식은 시간이 지나면 바뀐다(경쟁 글이 새로 올라오거나 빠짐).
+        try:
+            _scan_opportunities_weekly()
+        except Exception as e:
+            print("기회 스캔 건너뜀:", e)
+
+
+OPP_STAMP = ROOT / "data" / ".opportunity-last-scan"
+OPP_EVERY_DAYS = 7
+
+
+def _scan_opportunities_weekly() -> None:
+    """마지막 스캔이 OPP_EVERY_DAYS 보다 오래됐으면 기회 키워드를 다시 훑는다."""
+    import opportunity  # noqa: PLC0415
+
+    today = date.today()
+    if OPP_STAMP.exists():
+        try:
+            last = date.fromisoformat(OPP_STAMP.read_text(encoding="utf-8").strip())
+            if (today - last).days < OPP_EVERY_DAYS:
+                return
+        except Exception:
+            pass
+    print("[기회] 주간 스캔 시작(제품 시드 기준)")
+    opportunity.scan(opportunity.SEEDS, max_candidates=12)
+    OPP_STAMP.write_text(today.isoformat(), encoding="utf-8")
+
 
 def status() -> None:
     s = _load_state()
