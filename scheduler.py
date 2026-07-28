@@ -312,6 +312,13 @@ def _run(dry_run: bool = True) -> None:
         except Exception as e:
             print("경쟁 분석 건너뜀:", e)
 
+        # 수요 캐시 갱신(주 1회) — 초안 키워드가 바뀌면 캐시가 낡는다.
+        # 낡은 캐시는 '수요 0인데 큐 상위' 같은 잘못된 발행 순서를 만든다.
+        try:
+            _audit_demand_weekly()
+        except Exception as e:
+            print("수요 갱신 건너뜀:", e)
+
         # 기회 키워드 재스캔(주 1회) — 새 기회를 사람이 손으로 찾지 않아도 되게.
         # SERP 형식은 시간이 지나면 바뀐다(경쟁 글이 새로 올라오거나 빠짐).
         try:
@@ -322,23 +329,39 @@ def _run(dry_run: bool = True) -> None:
 
 OPP_STAMP = ROOT / "data" / ".opportunity-last-scan"
 OPP_EVERY_DAYS = 7
+DEMAND_STAMP = ROOT / "data" / ".demand-last-audit"
+DEMAND_EVERY_DAYS = 7
+
+
+def _stale(stamp: Path, days: int) -> bool:
+    """마지막 실행이 days 보다 오래됐는가(기록이 없으면 오래된 것으로 본다)."""
+    if not stamp.exists():
+        return True
+    try:
+        return (date.today() - date.fromisoformat(stamp.read_text(encoding="utf-8").strip())
+                ).days >= days
+    except Exception:
+        return True
+
+
+def _audit_demand_weekly() -> None:
+    """초안 키워드의 검색 수요를 다시 잰다. 캐시가 낡으면 발행 순서가 틀어진다."""
+    if not _stale(DEMAND_STAMP, DEMAND_EVERY_DAYS):
+        return
+    import demand  # noqa: PLC0415
+    print("[수요] 주간 갱신 시작")
+    demand.audit()
+    DEMAND_STAMP.write_text(date.today().isoformat(), encoding="utf-8")
 
 
 def _scan_opportunities_weekly() -> None:
     """마지막 스캔이 OPP_EVERY_DAYS 보다 오래됐으면 기회 키워드를 다시 훑는다."""
+    if not _stale(OPP_STAMP, OPP_EVERY_DAYS):
+        return
     import opportunity  # noqa: PLC0415
-
-    today = date.today()
-    if OPP_STAMP.exists():
-        try:
-            last = date.fromisoformat(OPP_STAMP.read_text(encoding="utf-8").strip())
-            if (today - last).days < OPP_EVERY_DAYS:
-                return
-        except Exception:
-            pass
     print("[기회] 주간 스캔 시작(제품 시드 기준)")
     opportunity.scan(opportunity.SEEDS, max_candidates=12)
-    OPP_STAMP.write_text(today.isoformat(), encoding="utf-8")
+    OPP_STAMP.write_text(date.today().isoformat(), encoding="utf-8")
 
 
 def status() -> None:

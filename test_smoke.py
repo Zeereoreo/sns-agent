@@ -143,6 +143,16 @@ def t_parser():
     import scheduler as sch
     check("주간 스캔 주기 설정", sch.OPP_EVERY_DAYS >= 7, sch.OPP_EVERY_DAYS)
     check("스캔 함수 존재", callable(sch._scan_opportunities_weekly))
+    check("수요 갱신도 주간", sch.DEMAND_EVERY_DAYS >= 7 and callable(sch._audit_demand_weekly))
+
+    # 주기 판정: 기록 없으면 '오래됨', 오늘 기록이면 '아님'
+    import tempfile as _tf
+    from datetime import date as _dt
+    with _tf.TemporaryDirectory() as td:
+        s = _P(td) / "stamp"
+        check("기록 없으면 실행 대상", sch._stale(s, 7) is True)
+        s.write_text(_dt.today().isoformat(), encoding="utf-8")
+        check("오늘 기록이면 건너뜀", sch._stale(s, 7) is False)
     check("지역형 아닌 판은 유지", pen("네온사인") == 1.0, pen("네온사인"))
     check("모르는 키워드는 할인 없음", pen("존재하지않는키워드") == 1.0)
 
