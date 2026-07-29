@@ -357,6 +357,152 @@ def set_topic(page, draft: str, post: dict, log_map: dict[str, str], dry: bool) 
     return res
 
 
+def _heading_anchors(draft_path) -> list[tuple[str, str]]:
+    """[(소제목, 그 바로 다음 본문 문단의 앞부분)] — 삽입 위치를 잡는 기준."""
+    from publish.draft_parser import parse_draft  # noqa: PLC0415
+
+    blocks = parse_draft(draft_path)["blocks"]
+    out = []
+    for i, b in enumerate(blocks):
+        if b["kind"] != "heading" or not b.get("text", "").strip():
+            continue
+        follow = ""
+        for nb in blocks[i + 1:]:
+            if nb["kind"] == "text" and len(nb.get("text", "").strip()) > 12:
+                follow = nb["text"].strip()
+                break
+        out.append((b["text"].strip(), follow))
+    return out
+
+
+def _insert_heading_before(page, heading: str, follow: str) -> int:
+    """`follow` 문단 앞에 `heading` 문단을 새로 만든다. 만든 문단 index 를 돌려준다(-1=실패)."""
+    if not follow:
+        return -1
+    key = follow[:18]
+    idx = page.evaluate("""(k) => {
+        const ps = document.querySelectorAll('.se-text-paragraph');
+        for (let i = 0; i < ps.length; i++) {
+            if ((ps[i].innerText || '').trim().startsWith(k)) return i;
+        }
+        return -1;
+    }""", key)
+    if idx < 0:
+        return -1
+    try:
+        page.locator(".se-text-paragraph").nth(idx).click()
+        page.wait_for_timeout(250)
+        page.keyboard.press("Home")
+        # 소제목 텍스트 + 줄바꿈 → 문단이 둘로 갈리고 앞쪽이 소제목이 된다
+        page.keyboard.type(heading, delay=18)
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(500)
+        # 방금 만든 문단(= 원래 idx 자리)이 소제목 텍스트인지 확인
+        got = page.evaluate("""(i) => {
+            const ps = document.querySelectorAll('.se-text-paragraph');
+            return ps[i] ? (ps[i].innerText || '').trim() : '';
+        }""", idx)
+        return idx if got == heading else -1
+    except Exception:
+        return -1
+
+
+def fix_headings(page, draft: str, post: dict, log_map: dict[str, str], dry: bool) -> dict:
+    """이미 발행된 글의 소제목을 '소제목' 문단 서식으로 바꾼다.
+
+    소제목 서식 기능을 나중에 넣어서, 그 전에 발행된 글은 소제목이 **평문**으로 나갔다
+    (2026-07-29 전수 확인: 19편 중 14편이 라이브 소제목 0개). 읽는 사람에게는 그냥
+    글자 덩어리로 보인다. 초안의 heading 블록 텍스트와 **정확히 같은** 문단만 고른다.
+    """
+    from publish.draft_parser import parse_draft  # noqa: PLC0415
+    from publish.naver import _set_text_format  # noqa: PLC0415
+
+    blog = config.NAVER_BLOG_ID
+    res = {"draft": draft, "added": 0, "ok": False, "reason": None}
+    dp = ROOT / "drafts" / draft
+    if not dp.exists():
+        res["reason"] = "초안 없음"
+        return res
+    heads = [b["text"].strip() for b in parse_draft(dp)["blocks"]
+             if b["kind"] == "heading" and b.get("text", "").strip()]
+    if not heads:
+        res["reason"] = "소제목 없음"
+        return res
+
+    no = _log_no(post["url"]) or log_map.get(_norm(post["title"]))
+    if not no:
+        for cand in draft_title_candidates(draft):
+            k = _norm(cand)
+            no = log_map.get(k) or next(
+                (v for kk, v in log_map.items() if k and (k in kk or kk in k)), None)
+            if no:
+                break
+    if not no:
+        res["reason"] = "logNo 없음"
+        return res
+    try:
+        page.goto(f"https://blog.naver.com/{blog}/postupdate?logNo={no}", timeout=60000)
+        page.wait_for_timeout(4000)
+        for sel in (".se-popup-button-cancel", "button:has-text('취소')"):
+            try:
+                page.locator(sel).first.click(timeout=1500)
+                break
+            except Exception:
+                continue
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(600)
+
+        before = page.locator(".se-component.se-sectionTitle").count()
+        if before >= len(heads):
+            res["ok"] = True
+            res["reason"] = f"이미 적용됨({before}개)"
+            return res
+        if dry:
+            res["ok"] = True
+            res["added"] = len(heads)
+            res["reason"] = f"dry-run: 소제목 {before} → {len(heads)}개 예정"
+            return res
+
+        for h, follow in _heading_anchors(dp):
+            # 본문에 같은 문구가 또 있을 수 있으므로 '문단 전체가 정확히 그 텍스트'인 것만
+            idx = page.evaluate("""(t) => {
+                const ps = document.querySelectorAll('.se-text-paragraph');
+                for (let i = 0; i < ps.length; i++) {
+                    if ((ps[i].innerText || '').trim() === t) return i;
+                }
+                return -1;
+            }""", h)
+            if idx < 0:
+                # 소제목이 **본문에 아예 없는** 글이 있다(초기 발행 3편). 서식 변경이 아니라
+                # 삽입이 필요하다 — 초안에서 그 소제목 **다음 문단**을 찾아 그 앞에 넣는다.
+                idx = _insert_heading_before(page, h, follow)
+                if idx < 0:
+                    continue
+            para = page.locator(".se-text-paragraph").nth(idx)
+            para.click()
+            page.wait_for_timeout(250)
+            page.keyboard.press("Home")
+            page.keyboard.press("Shift+End")
+            page.wait_for_timeout(200)
+            if _set_text_format(page, "소제목"):
+                res["added"] += 1
+            page.wait_for_timeout(300)
+
+        after = page.locator(".se-component.se-sectionTitle").count()
+        if after <= before:
+            res["reason"] = f"서식이 늘지 않음({before}→{after}) — 발행하지 않음"
+            return res
+        page.locator('[data-click-area="tpb.publish"]').first.click(timeout=8000)
+        page.wait_for_timeout(2200)
+        page.locator('[data-click-area="tpb*i.publish"]').first.click(timeout=8000)
+        page.wait_for_timeout(6000)
+        res["ok"] = True
+        res["reason"] = f"소제목 {before}→{after}개"
+    except Exception as e:
+        res["reason"] = f"오류: {str(e)[:70]}"
+    return res
+
+
 def draft_tags(draft: str) -> list[str]:
     """초안 헤더의 '태그:' 줄을 읽는다. 글마다 태그가 다르므로 라이브 동기화에 쓴다."""
     p = ROOT / "drafts" / draft
@@ -405,6 +551,8 @@ def main() -> None:
                     help="각 발행글에 **그 글 초안의 태그**를 반영(글마다 다른 태그를 한 번에)")
     ap.add_argument("--set-topic", action="store_true",
                     help="발행글의 '주제'(네이버 전역 분류)를 세그먼트에 맞게 지정")
+    ap.add_argument("--fix-headings", action="store_true",
+                    help="평문으로 나간 소제목에 '소제목' 문단 서식을 입힌다")
     ap.add_argument("--only", default=None, help="초안 접두사(예: c22)")
     ap.add_argument("--target", type=int, default=9)
     ap.add_argument("--dry-run", action="store_true")
@@ -435,6 +583,13 @@ def main() -> None:
             for d, p in items:
                 no = _log_no(p["url"]) or log_map.get(_norm(p["title"])) or "-"
                 print(f"  {d[:32]:34} logNo={no}")
+            ctx.close()
+            return
+        if a.fix_headings:
+            for d, p in items:
+                r = fix_headings(page, d, p, log_map, a.dry_run)
+                mark = "OK " if r["ok"] else "FAIL"
+                print(f"[{mark}] {d[:32]:34} {r['reason'] or ''}")
             ctx.close()
             return
         if a.set_topic:
