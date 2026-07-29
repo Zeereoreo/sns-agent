@@ -62,8 +62,11 @@ PLATFORM_TAGS_ROTATE = ["#SOOP", "#팬더TV", "#플렉스TV", "#띵라이브", "
 # made-us 가 실제로 만드는 물건이 아닌 키워드는 아무리 수요가 커도 후보가 아니다.
 _PRODUCT = ("피켓", "전광판", "네온", "간판", "아크릴", "사인", "버킷", "메뉴판")
 # made-us 가 만들지 않는 것 / 명백한 오프타겟(수요가 커도 제외)
+# '챌린지·기부'는 ALS 아이스버킷 챌린지 — 이름만 같고 제품이 아니다(2026-07-29 실제로
+# 0.748 점 기회 키워드 1위로 올라왔다). '가방·스텐저그'도 우리가 만드는 LED 버킷이 아니다.
 _NOT_OURS = ("응원봉", "슬로건", "커피차", "커피창고", "커피숍", "창업", "서포트",
-             "시트지", "썬팅", "어닝", "현수막", "배너", "명함", "스티커")
+             "시트지", "썬팅", "어닝", "현수막", "배너", "명함", "스티커",
+             "챌린지", "기부", "가방", "스텐저그")
 
 
 def is_our_product(kw: str) -> bool:
@@ -120,16 +123,29 @@ def _serp(page, kw: str) -> list[dict]:
     }""")
 
 
+def _nospace(s: str) -> str:
+    return re.sub(r"\s+", "", s)
+
+
 def diagnose(kw: str, items: list[dict]) -> dict:
     """상위 글 형식을 진단해 '우리가 들어갈 자리가 있는가'를 본다."""
     toks = [t for t in re.split(r"\s+", kw) if len(t) > 1]
+    kwn = _nospace(kw)
     n = len(items) or 1
-    ontopic = sum(1 for it in items if all(t in it["title"] for t in toks))
+    # 온토픽 판정은 **띄어쓰기를 무시**해야 한다. 붙여쓴 키워드('카페입간판')를 띄어쓴
+    # 제목('카페 입간판 추천')과 그냥 비교하면 전부 불일치로 나온다 — 실제로 카페입간판이
+    # 온토픽 0/10 으로 잡혀 기회점수 0.806(2위)까지 올라갔었다(2026-07-29).
+    # 붙여쓰기 변형을 자동 생성하는 기능과 겹쳐 상위 점수가 통째로 오염돼 있었다.
+    ontopic = sum(1 for it in items
+                  if kwn in _nospace(it["title"]) or all(t in it["title"] for t in toks))
     local = sum(1 for it in items if _LOCAL.search(it["title"]))
     case = sum(1 for it in items if _CASE.search(it["title"]))
     info = sum(1 for it in items if _INFO.search(it["title"]))
     return {"n": len(items), "ontopic": ontopic, "local": local, "case": case, "info": info,
-            "local_ratio": round(local / n, 2), "info_ratio": round(info / n, 2)}
+            "local_ratio": round(local / n, 2), "info_ratio": round(info / n, 2),
+            # 온토픽이 하나도 없으면 '빈틈'이 아니라 **다른 뜻**일 때가 많다.
+            # 실제 예: '바사인' 상위=성경 바사(페르시아) / '룸사인' 상위=호텔 객실 후기.
+            "homonym_risk": bool(ontopic == 0 and len(items) >= 5)}
 
 
 def score(demand: int, d: dict) -> float:
@@ -139,7 +155,12 @@ def score(demand: int, d: dict) -> float:
     gap = 1.0 - (d["ontopic"] / max(d["n"], 1))       # 정조준 글이 적을수록 빈틈
     fit = 1.0 - d["local_ratio"]                      # 지역형이 많을수록 우리 자리 없음
     bonus = 1.0 + 0.3 * d["info_ratio"]               # 정보형이 통하는 판이면 가산
-    return round(min(demand, 10) / 10 * (0.35 + 0.65 * gap) * fit * bonus, 3)
+    s = min(demand, 10) / 10 * (0.35 + 0.65 * gap) * fit * bonus
+    # 온토픽 0 은 최대 gap 을 받아 점수가 제일 높게 나오는데, 그 중 상당수가 동음이의어다.
+    # 확신할 수 없으니 지우지는 않고 절반으로 깎아 '검토 대상'으로 남긴다(제목을 봐야 안다).
+    if d.get("homonym_risk"):
+        s *= 0.5
+    return round(s, 3)
 
 
 def scan(seeds: list[str], max_candidates: int) -> None:
@@ -220,10 +241,16 @@ def _report(rows: list[dict]) -> None:
     print("\n===== 기회 키워드 상위 =====")
     print(f"{'점수':>6} {'수요':>4} {'온토픽':>6} {'지역':>4}  키워드")
     for r in rows[:15]:
+        warn = "  ⚠동음이의어?" if r.get("homonym_risk") else ""
         print(f"{r['score']:>6} {r['demand']:>4} {r['ontopic']:>3}/{r['n']:<2} "
-              f"{r['local']:>4}  {r['keyword']}")
+              f"{r['local']:>4}  {r['keyword']}{warn}")
     print("\n※ 지역 수가 크면 '지역+시공후기' 판 — 실제 시공지를 모르면 정직하게 못 쓴다(회피).")
     print("※ 온토픽이 적을수록 그 키워드를 정조준한 글이 없다는 뜻(빈틈).")
+    risky = [r for r in rows[:15] if r.get("homonym_risk")]
+    if risky:
+        print("\n⚠ 온토픽 0 — '빈틈'이 아니라 다른 뜻일 수 있다. 상위 제목을 직접 볼 것:")
+        for r in risky[:5]:
+            print(f"   {r['keyword']}: {' / '.join(r.get('top_titles', [])[:2])}")
 
 
 def retarget() -> None:

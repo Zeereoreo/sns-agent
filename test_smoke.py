@@ -174,6 +174,18 @@ def t_parser():
     check("안 만드는 것 제외",
           not is_our_product("응원봉") and not is_our_product("커피창고")
           and not is_our_product("간판 시트지"))
+    check("아이스버킷 챌린지/가방 제외",
+          not is_our_product("아이스버킷챌린지") and not is_our_product("아이스버킷 가방"))
+
+    # 온토픽 판정은 띄어쓰기를 무시해야 한다('카페입간판' vs '카페 입간판 추천')
+    import opportunity as _opp
+    _joined = _opp.diagnose("카페입간판", [{"title": "카페 입간판 추천, 철제입간판"}] * 3)
+    check("붙여쓴 키워드도 온토픽으로 잡힌다", _joined["ontopic"] == 3, _joined["ontopic"])
+    # 온토픽 0 은 빈틈이 아니라 동음이의어일 수 있다 → 표시하고 점수를 깎는다
+    _homo = _opp.diagnose("바사인", [{"title": f"창세기 성경공부 {i}장"} for i in range(6)])
+    check("온토픽 0 이면 동음이의어 경보", _homo["homonym_risk"] is True)
+    check("동음이의어 의심은 점수 절반",
+          _opp.score(7, _homo) < _opp.score(7, dict(_homo, homonym_risk=False)))
     check("제목이 있다", d["title"] and d["title"] != "제목 없음")
     check("태그 5개 이상", len(d["tags"]) >= 5, f"tags={len(d['tags'])}")
     check("본문 text 블록이 # 로 시작하지 않음",
