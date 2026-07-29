@@ -118,6 +118,22 @@ _POST_JS = """() => {
 }"""
 
 
+def _expand_tags(page) -> None:
+    """m.blog 은 태그를 한 줄만 렌더하고 나머지를 '+6' 버튼 뒤에 숨긴다.
+
+    숨은 태그는 DOM 에 아예 없어서 innerText/textContent 어느 쪽으로도 안 읽힌다
+    (2026-07-29 실측: 우리 글 태그 10개 중 4개만 잡혔다). 펼친 뒤에 읽어야 한다.
+    태그가 짧아 한 줄에 다 들어가면 버튼이 없다 — 없으면 그냥 넘어간다.
+    """
+    try:
+        more = page.locator("button, a").filter(has_text=re.compile(r"^\+\d+$"))
+        if more.count():
+            more.first.click(timeout=2000)
+            page.wait_for_timeout(600)
+    except Exception:
+        pass
+
+
 def _serp_google(page, keyword: str, limit: int = 10) -> list[dict]:
     """구글 상위 결과. **headed 브라우저에서만 동작**한다.
 
@@ -216,6 +232,7 @@ def _analyze_on(page, arg: str, google: bool) -> dict:
         try:
             page.goto(f"https://m.blog.naver.com/{x['id']}/{x['no']}", timeout=25000)
             page.wait_for_timeout(1800)
+            _expand_tags(page)
             m = page.evaluate(_POST_JS)
         except Exception:
             m = None

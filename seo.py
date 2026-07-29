@@ -54,6 +54,7 @@ WEIGHTS = {
 }
 TITLE_MAX = 42
 TITLE_GOOGLE = 30    # 구글 SERP 가 한글 제목을 자르는 지점(대략)
+TAG_MAX = 20         # 경쟁 상위 글 실측 상한(enrich_posts.TAG_MAX 와 같은 근거)
 BODY_MIN = 1000
 BODY_GOOD = 1500
 
@@ -149,7 +150,10 @@ def score_draft(path: Path) -> dict:
     n_capable = min(n_img, n_cap + max(0, n_img - 1))
     add("captions", n_img > 0 and n_capable == n_img, f"캡션 {n_capable}/{n_img}",
         partial=(n_capable / n_img if n_img else 0))
-    add("tags", 5 <= len(d["tags"]) <= 10, f"태그 {len(d['tags'])}개", fixable=True)
+    # 상한 10 은 어뷰징 방지용으로 우리가 임의로 건 것이었는데, 실측해 보니 네이버는
+    # 그보다 많이 허용하고 같은 판의 상위 경쟁 글은 12~20개를 쓴다(2026-07-29).
+    # 10 으로 막는 건 검색 노출면을 스스로 절반 버리는 것이라 8~20 으로 넓힌다.
+    add("tags", 8 <= len(d["tags"]) <= TAG_MAX, f"태그 {len(d['tags'])}개", fixable=True)
     add("tag_kw", bool(kw_tokens and any(any(t in tag for t in kw_tokens) for tag in d["tags"])),
         "태그에 키워드 토큰 " + ("있음" if d["tags"] else "없음"), fixable=True)
 

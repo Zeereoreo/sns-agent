@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -32,6 +33,10 @@ import config  # noqa: E402
 from publish import images as imgmod  # noqa: E402
 
 STATE = ROOT / "data" / "publish_state.json"
+
+# 네이버가 실제로 허용하는 태그 수는 10 보다 많다(2026-07-29 실측). 같은 판의 상위
+# 경쟁 글이 12~20개를 쓰므로 20 까지 채운다 — 그 이상은 확인 안 된 영역이라 두지 않는다.
+TAG_MAX = 20
 
 
 def published_posts() -> dict[str, dict]:
@@ -199,7 +204,11 @@ def enrich(page, draft: str, post: dict, log_map: dict[str, str],
 
 def add_tags(page, draft: str, post: dict, log_map: dict[str, str],
              tags: list[str], dry: bool) -> dict:
-    """이미 발행된 글의 태그를 보강한다(네이버 상한 10개).
+    """이미 발행된 글의 태그를 보강한다.
+
+    상한을 10 으로 두고 있었는데 **그건 우리가 잘못 넣은 가정**이었다(2026-07-29 실측:
+    11번째 태그가 정상 입력됨). 같은 판의 경쟁 상위 글은 12~20개를 쓴다
+    (linosgj 8~17 · jayent_media 20). 10 으로 막아 슬롯 절반을 버리고 있었다.
 
     측정(자동완성)이 놓쳤을 검색 경로를 태그로 열어두기 위함 — 비용 0, 되돌리기 쉬움.
     """
@@ -241,7 +250,7 @@ def add_tags(page, draft: str, post: dict, log_map: dict[str, str],
             return {t.lstrip("#").strip() for t in got if t.strip()}
 
         cur = current()
-        room = 10 - len(cur)
+        room = TAG_MAX - len(cur)
         want = [t.lstrip("#") for t in tags if t.lstrip("#") not in cur][:max(0, room)]
         if not want:
             res["ok"] = True
@@ -271,6 +280,15 @@ def add_tags(page, draft: str, post: dict, log_map: dict[str, str],
     except Exception as e:
         res["reason"] = f"오류: {str(e)[:70]}"
     return res
+
+
+def draft_tags(draft: str) -> list[str]:
+    """초안 헤더의 '태그:' 줄을 읽는다. 글마다 태그가 다르므로 라이브 동기화에 쓴다."""
+    p = ROOT / "drafts" / draft
+    if not p.exists():
+        return []
+    m = re.search(r"^태그:\s*(.+)$", p.read_text(encoding="utf-8"), flags=re.M)
+    return m.group(1).split() if m else []
 
 
 def fix_urls(page, blog: str) -> int:
@@ -308,6 +326,8 @@ def main() -> None:
     ap.add_argument("--fix-urls", action="store_true", help="logNo 없는 URL 기록 복구")
     ap.add_argument("--add-tags", default=None,
                     help="발행된 글에 태그 추가(쉼표 구분). 예: 스트리머굿즈,스트리머굿즈제작")
+    ap.add_argument("--sync-tags", action="store_true",
+                    help="각 발행글에 **그 글 초안의 태그**를 반영(글마다 다른 태그를 한 번에)")
     ap.add_argument("--only", default=None, help="초안 접두사(예: c22)")
     ap.add_argument("--target", type=int, default=9)
     ap.add_argument("--dry-run", action="store_true")
@@ -340,9 +360,14 @@ def main() -> None:
                 print(f"  {d[:32]:34} logNo={no}")
             ctx.close()
             return
-        if a.add_tags:
-            tags = [t.strip() for t in a.add_tags.split(",") if t.strip()]
+        if a.add_tags or a.sync_tags:
+            fixed_tags = ([t.strip() for t in a.add_tags.split(",") if t.strip()]
+                          if a.add_tags else None)
             for d, p in items:
+                tags = fixed_tags if fixed_tags is not None else draft_tags(d)
+                if not tags:
+                    print(f"[SKIP] {d[:32]:34} 초안 태그 없음")
+                    continue
                 r = add_tags(page, d, p, log_map, tags, a.dry_run)
                 mark = "OK " if r["ok"] else "FAIL"
                 print(f"[{mark}] {d[:32]:34} +{r['added']}개  {r['reason'] or ''}")
