@@ -922,6 +922,19 @@ def run_diagnostics(d) -> list[dict]:
         add("네이버 색인", "ok",
             f"표본 {idx['sampled']}편 전부 색인됨 ({idx.get('checked','')})")
 
+    # 1-2) 라이브 전수 대조(주 1회) — 발행된 글이 아직도 계획대로인지
+    la = _load_json(ROOT / "data" / "live_audit.json", {})
+    if not la:
+        add("라이브 글 점검", "warn", "아직 감사 기록 없음(주 1회 자동 실행)")
+    elif la.get("bad"):
+        names = ", ".join(b["draft"][:18] for b in la["bad"][:4])
+        add("라이브 글 점검", "warn",
+            f"{la.get('total')}편 중 {len(la['bad'])}편 어긋남 — {names}",
+            "python enrich_posts.py --fix-headings / --sync-tags 로 보정")
+    else:
+        add("라이브 글 점검", "ok",
+            f"{la.get('total')}편 전부 계획대로 ({la.get('checked','')})")
+
     # 2) 세션
     sv = _session_view(d)
     if sv is None:

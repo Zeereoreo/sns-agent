@@ -564,8 +564,10 @@ def _audit_live_post(page, url: str, expect: dict) -> dict:
         out["issues"].append(f"이미지 {live['images']}/{expect['images']}")
     if expect.get("tags") and live["tags"] < expect["tags"]:
         out["issues"].append(f"태그 {live['tags']}/{expect['tags']}")
-    if expect.get("headings") and live["headings"] == 0:
-        out["issues"].append(f"소제목 서식 0/{expect['headings']} (평문으로 나감)")
+    if expect.get("headings") and live["headings"] < expect["headings"]:
+        # 0 일 때만 잡으면 '5/7 처럼 일부만 들어간' 글을 놓친다(실제로 놓쳤다).
+        tail = " (평문으로 나감)" if live["headings"] == 0 else ""
+        out["issues"].append(f"소제목 서식 {live['headings']}/{expect['headings']}{tail}")
     if live["length"] < 600:
         out["issues"].append(f"본문 {live['length']}자 — 잘렸을 수 있음")
     if out["issues"]:

@@ -367,11 +367,20 @@ def _run(dry_run: bool = True) -> None:
         except Exception as e:
             print("기회 스캔 건너뜀:", e)
 
+        # 라이브 전수 대조(주 1회) — 발행된 글이 아직도 계획대로인지.
+        try:
+            _audit_live_weekly()
+        except Exception as e:
+            print("라이브 감사 건너뜀:", e)
+
 
 OPP_STAMP = ROOT / "data" / ".opportunity-last-scan"
 OPP_EVERY_DAYS = 7
 DEMAND_STAMP = ROOT / "data" / ".demand-last-audit"
 DEMAND_EVERY_DAYS = 7
+LIVE_STAMP = ROOT / "data" / ".live-last-audit"
+LIVE_EVERY_DAYS = 7
+LIVE_REPORT = ROOT / "data" / "live_audit.json"
 
 
 def _stale(stamp: Path, days: int) -> bool:
@@ -393,6 +402,57 @@ def _audit_demand_weekly() -> None:
     print("[수요] 주간 갱신 시작")
     demand.audit()
     DEMAND_STAMP.write_text(date.today().isoformat(), encoding="utf-8")
+
+
+def _audit_live_weekly() -> None:
+    """발행된 글이 **아직도** 계획대로인지 주 1회 전수 대조한다.
+
+    발행 직후 점검(publish._audit_live_post)은 그 순간만 본다. 나중에 네이버 렌더링이
+    바뀌거나 우리가 소급 수정을 잘못하면 조용히 어긋난다. 실제로 소제목이 평문으로
+    나간 14편을 9일 뒤에야 발견했다(2026-07-29). 결과는 data/live_audit.json 에 남겨
+    대시보드 진단이 읽는다.
+    """
+    if not _stale(LIVE_STAMP, LIVE_EVERY_DAYS):
+        return
+    import json as _json  # noqa: PLC0415
+    import re as _re  # noqa: PLC0415
+
+    from playwright.sync_api import sync_playwright  # noqa: PLC0415
+
+    from publish.browser import launch_context  # noqa: PLC0415
+    from publish.draft_parser import parse_draft  # noqa: PLC0415
+    from publish.naver import _audit_live_post  # noqa: PLC0415
+
+    print("[라이브 감사] 주간 전수 대조 시작")
+    s = _load_state()
+    last = {}
+    for e in s.get("log", []):
+        if e.get("ok") and not e.get("dry") and e.get("draft"):
+            last[e["draft"]] = e
+
+    rows = []
+    with sync_playwright() as p:
+        ctx = launch_context(p, headed=False)
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        for name, e in last.items():
+            dp = DRAFTS / name
+            if not dp.exists() or not _re.search(r"/(\d{6,})", e.get("url") or ""):
+                continue
+            d = parse_draft(dp)
+            r = _audit_live_post(page, e["url"], {
+                "images": e.get("planned_images") or 0,
+                "tags": len(d["tags"]),
+                "headings": sum(1 for b in d["blocks"] if b["kind"] == "heading"),
+            })
+            if r.get("issues"):
+                rows.append({"draft": name, "url": e["url"], "issues": r["issues"]})
+        ctx.close()
+
+    LIVE_REPORT.write_text(_json.dumps(
+        {"checked": date.today().isoformat(), "total": len(last), "bad": rows},
+        ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"[라이브 감사] {len(last)}편 중 문제 {len(rows)}편")
+    LIVE_STAMP.write_text(date.today().isoformat(), encoding="utf-8")
 
 
 def _scan_opportunities_weekly() -> None:
