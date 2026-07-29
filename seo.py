@@ -52,8 +52,15 @@ WEIGHTS = {
     "tags": 6,           # 태그 개수
     "tag_kw": 4,         # 태그에 키워드 토큰
 }
-TITLE_MAX = 42
-TITLE_GOOGLE = 30    # 구글 SERP 가 한글 제목을 자르는 지점(대략)
+# 제목 정책(2026-07-29 전면 수정 — 근거: 원본 made-us 와 경쟁사 실측)
+#   원본 made-us(누적 10만 방문, 구글 '개인방송 피켓' 1위)의 제목은 **70~107자(중앙 98)**
+#   키워드 나열형이다. 구글 1위인 그 글 제목이 정확히 104자 나열형이었다.
+#   경쟁사 linosgj 도 같은 형식. **우리만 19~26자로 짧게 쓰고, 우리만 노출이 0이다.**
+#   기존 상한 42자는 '구글이 30자에서 자른다'는 이유로 우리가 건 제약이었는데,
+#   잘려 보이는 것과 색인되는 것은 다르다. 절단 대비는 **앞 30자에 핵심**으로 해결한다.
+TITLE_HEAD = 30      # 이 앞부분에 대표 키워드가 있어야 한다(구글 SERP 절단 구간)
+TITLE_MAX = 100      # 네이버 제목 상한
+TITLE_GOOD = 45      # 이보다 짧으면 키워드 커버리지가 아깝다(원본 중앙값 98)
 TAG_MAX = 20         # 경쟁 상위 글 실측 상한(enrich_posts.TAG_MAX 와 같은 근거)
 BODY_MIN = 1000
 BODY_GOOD = 1500
@@ -127,12 +134,21 @@ def score_draft(path: Path) -> dict:
 
     add("title_kw", bool(kw and (kw in title or sum(1 for t in kw_tokens if t in title) >= max(1, len(kw_tokens) - 1))),
         f"제목에 '{kw}' {'포함' if kw and kw in title else '부분/누락'}")
-    # 구글 검색결과는 한글 제목을 30자 안팎에서 자른다(네이버 상한 42자와 별개).
-    # 30자 이내면 만점, 42자까지는 부분점수.
-    add("title_len", len(title) <= TITLE_GOOGLE,
-        f"제목 {len(title)}자 (구글 노출 {TITLE_GOOGLE}자·네이버 {TITLE_MAX}자 기준)",
-        partial=(1.0 if len(title) <= TITLE_GOOGLE
-                 else max(0.0, (TITLE_MAX - len(title)) / (TITLE_MAX - TITLE_GOOGLE))))
+    # 제목은 **앞 30자에 대표 키워드**(절단 대비) + **전체 길이로 키워드 커버리지**.
+    # 짧은 제목은 감점한다 — 이 판의 승자(원본 made-us·경쟁사 linosgj)는 전부 나열형 장문이다.
+    head = title[:TITLE_HEAD]
+    head_ok = bool(kw and (kw in head
+                           or sum(1 for t in kw_tokens if t in head) >= max(1, len(kw_tokens) - 1)))
+    if len(title) > TITLE_MAX:
+        cover = 0.0                                    # 네이버 상한 초과 = 잘림
+    elif len(title) >= TITLE_GOOD:
+        cover = 1.0
+    else:
+        cover = 0.4 + 0.6 * (len(title) / TITLE_GOOD)  # 짧을수록 커버리지 손해
+    add("title_len", head_ok and len(title) >= TITLE_GOOD,
+        f"제목 {len(title)}자 (권장 {TITLE_GOOD}~{TITLE_MAX}) · 앞{TITLE_HEAD}자 키워드 "
+        + ("있음" if head_ok else "없음"),
+        partial=cover * (1.0 if head_ok else 0.5))
     add("intro_kw", bool(kw and (kw in first_para or sum(1 for t in kw_tokens if t in first_para) >= max(1, len(kw_tokens) - 1))),
         f"첫 문단 키워드 {'있음' if kw and kw in first_para else '부분/누락'}")
     add("body_len", body_len >= BODY_MIN, f"본문 {body_len}자",

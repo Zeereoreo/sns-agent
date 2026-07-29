@@ -34,22 +34,22 @@ def _title_ok(t: str, kw: str) -> bool:
     return sum(1 for w in toks if w in t) >= max(1, len(toks) - 1)
 
 
-TITLE_GOOGLE_MAX = 30   # 구글 SERP 가 한글 제목을 자르는 지점(대략)
+TITLE_NAVER_MAX = 100   # 네이버 블로그 제목 상한(구글 절단은 '앞 30자에 핵심'으로 대비)
 
 
 def _choose_title(cands: list[str], kw: str, name: str) -> str:
     """초안 파일명 기반 결정론적 선택(프로세스 재시작해도 동일). 후보2 안전할 때만 로테이션.
 
-    ★짧은 후보 우선: 구글 검색결과는 한글 제목을 30자쯤에서 자른다. 짧은 후보가 있는데
-    로테이션이 긴 후보를 고르면 그 발행분만 구글에서 제목이 잘린다(2026-07-28 a13 에서 발견 —
-    H1 은 13자인데 로테이션이 32자짜리 후보2를 쓰고 있었다).
-    30자 이하 후보가 하나라도 있으면 그 안에서만 로테이션한다.
+    2026-07-28 에는 '구글이 30자에서 자르니 짧은 후보 우선'으로 뒀었다. 그런데 2026-07-29
+    실측에서 이 판의 승자는 전부 반대였다 — 원본 made-us(구글 '개인방송 피켓' 1위)는
+    **104자 나열형**, 경쟁사 linosgj 도 나열형. 짧게 쓰는 건 우리뿐이고 노출도 우리만 0이다.
+    잘려 **보이는** 것과 색인되는 것은 다르므로, 절단 대비는 '앞 30자에 핵심'으로 하고
+    길이 제한은 걸지 않는다(네이버 상한 100자만 지킨다).
     """
     if not cands:
         return "제목 없음"
     usable = [c for c in cands if _title_ok(c, kw)] or cands
-    short = [c for c in usable if len(c) <= TITLE_GOOGLE_MAX]
-    pool = short or usable
+    pool = [c for c in usable if len(c) <= TITLE_NAVER_MAX] or usable
     if len(pool) < 2:
         return pool[0]
     # 안정적 해시(파이썬 hash는 프로세스마다 달라 사용 불가)

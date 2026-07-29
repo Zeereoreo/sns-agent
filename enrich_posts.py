@@ -357,6 +357,84 @@ def set_topic(page, draft: str, post: dict, log_map: dict[str, str], dry: bool) 
     return res
 
 
+def sync_title(page, draft: str, post: dict, log_map: dict[str, str], dry: bool) -> dict:
+    """발행된 글의 제목을 초안의 (확장된) 제목으로 교체한다.
+
+    2026-07-29 제목 정책 변경 — 이 판의 승자는 나열형 장문 제목이다(원본 made-us 구글
+    '개인방송 피켓' 1위 글이 104자, 경쟁사 linosgj 도 동일). 우리 발행분은 19~26자라
+    키워드 커버리지를 거의 못 가져간다. 색인이 열렸을 때를 대비해 미리 바꿔둔다.
+    """
+    from publish.draft_parser import parse_draft  # noqa: PLC0415
+
+    blog = config.NAVER_BLOG_ID
+    res = {"draft": draft, "added": 0, "ok": False, "reason": None}
+    dp = ROOT / "drafts" / draft
+    if not dp.exists():
+        res["reason"] = "초안 없음"
+        return res
+    want = parse_draft(dp)["title"]
+    if not want or want == "제목 없음":
+        res["reason"] = "초안 제목 없음"
+        return res
+
+    no = _log_no(post["url"]) or log_map.get(_norm(post["title"]))
+    if not no:
+        for cand in draft_title_candidates(draft):
+            k = _norm(cand)
+            no = log_map.get(k) or next(
+                (v for kk, v in log_map.items() if k and (k in kk or kk in k)), None)
+            if no:
+                break
+    if not no:
+        res["reason"] = "logNo 없음"
+        return res
+    try:
+        page.goto(f"https://blog.naver.com/{blog}/postupdate?logNo={no}", timeout=60000)
+        page.wait_for_timeout(4000)
+        for sel in (".se-popup-button-cancel", "button:has-text('취소')"):
+            try:
+                page.locator(sel).first.click(timeout=1500)
+                break
+            except Exception:
+                continue
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(600)
+
+        cur = (page.locator(".se-section-documentTitle").first.inner_text() or "").strip()
+        if cur.replace(" ", "") == want.replace(" ", ""):
+            res["ok"] = True
+            res["reason"] = "이미 동일"
+            return res
+        if dry:
+            res["ok"] = True
+            res["added"] = 1
+            res["reason"] = f"dry-run: {len(cur)}자 → {len(want)}자"
+            return res
+
+        page.locator(".se-section-documentTitle").first.click()
+        page.wait_for_timeout(400)
+        page.keyboard.press("Control+A")
+        page.keyboard.press("Delete")
+        page.wait_for_timeout(300)
+        page.keyboard.type(want, delay=12)
+        page.wait_for_timeout(600)
+        got = (page.locator(".se-section-documentTitle").first.inner_text() or "").strip()
+        if got.replace(" ", "") != want.replace(" ", ""):
+            res["reason"] = f"제목 입력 확인 실패({len(got)}자) — 발행하지 않음"
+            return res
+
+        page.locator('[data-click-area="tpb.publish"]').first.click(timeout=8000)
+        page.wait_for_timeout(2200)
+        page.locator('[data-click-area="tpb*i.publish"]').first.click(timeout=8000)
+        page.wait_for_timeout(6000)
+        res["ok"] = True
+        res["added"] = 1
+        res["reason"] = f"{len(cur)}자 → {len(want)}자"
+    except Exception as e:
+        res["reason"] = f"오류: {str(e)[:70]}"
+    return res
+
+
 def _heading_anchors(draft_path) -> list[tuple[str, str]]:
     """[(소제목, 그 바로 다음 본문 문단의 앞부분)] — 삽입 위치를 잡는 기준."""
     from publish.draft_parser import parse_draft  # noqa: PLC0415
@@ -555,6 +633,8 @@ def main() -> None:
                     help="발행글의 '주제'(네이버 전역 분류)를 세그먼트에 맞게 지정")
     ap.add_argument("--fix-headings", action="store_true",
                     help="평문으로 나간 소제목에 '소제목' 문단 서식을 입힌다")
+    ap.add_argument("--sync-titles", action="store_true",
+                    help="발행글 제목을 초안의 (확장된) 제목으로 교체")
     ap.add_argument("--only", default=None, help="초안 접두사(예: c22)")
     ap.add_argument("--target", type=int, default=9)
     ap.add_argument("--dry-run", action="store_true")
@@ -585,6 +665,13 @@ def main() -> None:
             for d, p in items:
                 no = _log_no(p["url"]) or log_map.get(_norm(p["title"])) or "-"
                 print(f"  {d[:32]:34} logNo={no}")
+            ctx.close()
+            return
+        if a.sync_titles:
+            for d, p in items:
+                r = sync_title(page, d, p, log_map, a.dry_run)
+                mark = "OK " if r["ok"] else "FAIL"
+                print(f"[{mark}] {d[:32]:34} {r['reason'] or ''}")
             ctx.close()
             return
         if a.fix_headings:

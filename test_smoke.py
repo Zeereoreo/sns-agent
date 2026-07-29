@@ -127,12 +127,17 @@ def t_parser():
 
     check("지역형 판은 강하게 할인", pen("노래방 간판") <= 0.35, pen("노래방 간판"))
 
-    # 제목 로테이션은 짧은 후보를 우선한다(구글 SERP 30자 컷)
-    from publish.draft_parser import _choose_title
+    # 제목 정책(2026-07-29 수정): 길이로 거르지 않는다. 이 판의 승자는 나열형 장문이고
+    # (원본 made-us 구글 1위 글이 104자), 짧게 쓰는 건 우리뿐이었다. 상한은 네이버 100자만.
+    from publish.draft_parser import TITLE_NAVER_MAX, _choose_title
     short, long_ = "짧은 제목 피켓", "아주 길게 늘어놓은 방송용 피켓 제목 후보 예시입니다 정말 길죠"
     picked = {_choose_title([short, long_], "피켓", f"x{i}.md") for i in range(6)}
-    check("긴 후보 대신 짧은 후보만", picked == {short}, picked)
-    check("짧은 후보 없으면 그대로", _choose_title([long_], "피켓", "y.md") == long_)
+    check("긴 후보도 로테이션에 포함", len(picked) >= 1 and picked <= {short, long_}, picked)
+    over = "피켓" + "가" * 120
+    check("네이버 상한 넘는 후보는 제외",
+          _choose_title([short, over], "피켓", "z.md") == short)
+    check("상한 넘는 것뿐이면 그대로", _choose_title([over], "피켓", "w.md") == over)
+    check("제목 상한 100", TITLE_NAVER_MAX == 100)
 
     # 세션 만료 사전 경고: 죽고 나서가 아니라 미리 알아야 발행이 안 멈춘다
     import metrics as _m
