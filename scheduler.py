@@ -285,6 +285,8 @@ def _run(dry_run: bool = True) -> None:
                      "planned_images": len(picks),
                      "seo_score": seo_score, "seo_grade": seo_grade,
                      "title": res.get("title"),   # 발행에 쓰인 제목(A/B 로테이션 관찰용)
+                     # 라이브 글 실측(이미지·태그·소제목·본문). '발행됨'과 '제대로 나감'은 다르다.
+                     "audit": res.get("audit"),
                      "reason": reason, "url": res.get("url")})
     _save_state(s)
     if not dry_run:

@@ -509,12 +509,71 @@ def publish(draft_path: str, image_dir: str | None = None,
                 result["ok"] = True
                 result["url"] = url
                 print(f"🚀 발행 완료(확인됨). 이미지 {result['images_inserted']}장")
+                # '떴다'와 '제대로 떴다'는 다르다 — 라이브 글을 열어 계획과 대조한다.
+                result["audit"] = _audit_live_post(page, url, {
+                    "images": len(image_paths or []),
+                    "tags": len(data["tags"]),
+                    "headings": sum(1 for b in data["blocks"] if b["kind"] == "heading"),
+                })
             else:
                 result["reason"] = result["reason"] or "not_found_after_publish"
                 print("‼ 발행했지만 블로그 목록에서 글을 찾지 못했습니다:", result["reason"])
 
         ctx.close()
         return result
+
+
+_LIVE_JS = """() => {
+  const c = document.querySelector('.se-main-container') || document.body;
+  return {
+    length: (c.innerText || '').replace(/\\s/g, '').length,
+    images: c.querySelectorAll('img').length,
+    headings: c.querySelectorAll('.se-component.se-sectionTitle').length,
+    tags: Array.from(document.querySelectorAll('a'))
+            .map(a => (a.innerText || '').trim())
+            .filter(t => /^#\\S/.test(t)).length,
+  };
+}"""
+
+
+def _audit_live_post(page, url: str, expect: dict) -> dict:
+    """발행된 글을 **실제로 열어** 계획대로 나갔는지 대조한다.
+
+    '발행 성공'은 지금까지 *버튼을 눌렀다*는 뜻이었지 *결과가 맞다*는 뜻이 아니었다.
+    그래서 소제목 서식이 안 들어간 채 14편이 나간 것을 9일 뒤에야 알았다(2026-07-29).
+    여기서 어긋나면 로그에 남겨 다음 주기에 잡을 수 있게 한다.
+    """
+    out = {"issues": []}
+    try:
+        page.goto(url, timeout=30000)
+        page.wait_for_timeout(2200)
+        # m.blog 은 태그를 '+N' 버튼 뒤에 숨긴다 — 펼쳐야 다 세어진다.
+        try:
+            more = page.locator("button, a").filter(has_text=re.compile(r"^\+\d+$"))
+            if more.count():
+                more.first.click(timeout=2000)
+                page.wait_for_timeout(500)
+        except Exception:
+            pass
+        live = page.evaluate(_LIVE_JS)
+    except Exception as e:
+        out["issues"].append(f"확인 실패: {str(e)[:50]}")
+        return out
+    out.update(live)
+    if expect.get("images") and live["images"] < expect["images"]:
+        out["issues"].append(f"이미지 {live['images']}/{expect['images']}")
+    if expect.get("tags") and live["tags"] < expect["tags"]:
+        out["issues"].append(f"태그 {live['tags']}/{expect['tags']}")
+    if expect.get("headings") and live["headings"] == 0:
+        out["issues"].append(f"소제목 서식 0/{expect['headings']} (평문으로 나감)")
+    if live["length"] < 600:
+        out["issues"].append(f"본문 {live['length']}자 — 잘렸을 수 있음")
+    if out["issues"]:
+        print("  ⚠ 발행 결과 점검:", " · ".join(out["issues"]))
+    else:
+        print(f"  발행 결과 점검 OK (이미지 {live['images']} · 태그 {live['tags']} "
+              f"· 소제목 {live['headings']} · {live['length']}자)")
+    return out
 
 
 def _set_text_format(page, label: str) -> bool:

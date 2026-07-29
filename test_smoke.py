@@ -193,6 +193,11 @@ def t_parser():
           all(TOPIC_BY_SEG.get(s) for s in ("a", "b", "c", "s")), TOPIC_BY_SEG)
     check("BJ 글 주제는 '방송'", TOPIC_BY_SEG["a"] == "방송" and TOPIC_BY_SEG["s"] == "방송")
     check("주제 설정 함수 존재", callable(_set_topic))
+    # 발행 후 라이브 대조 — '발행됨'과 '제대로 나감'은 다르다(소제목 없이 14편이 나갔었다)
+    from publish.naver import _LIVE_JS, _audit_live_post  # noqa: F401
+    check("발행 결과 점검 함수 존재", callable(_audit_live_post))
+    check("점검 JS 가 소제목·태그를 센다",
+          "se-sectionTitle" in _LIVE_JS and "tags" in _LIVE_JS)
     check("제목이 있다", d["title"] and d["title"] != "제목 없음")
     check("태그 5개 이상", len(d["tags"]) >= 5, f"tags={len(d['tags'])}")
     check("본문 text 블록이 # 로 시작하지 않음",
