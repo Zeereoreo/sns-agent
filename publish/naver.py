@@ -53,7 +53,46 @@ SEL = {
     "tag_input": "input#tag-input, input.tag_input, input[placeholder*='태그']",
     "publish_confirm": "[data-click-area='tpb*i.publish'], .confirm_btn__WEaBq",  # 레이어 최종 발행
     "category_open": "[data-click-area='tpb*i.category']",  # 발행 레이어 카테고리 드롭다운
+    "topic_open": "a[data-click-area='tpb*i.subject']",     # 발행 레이어 '주제'(네이버 전역 분류)
 }
+
+# 세그먼트 → 네이버 '주제'. 카테고리(우리 게시판)와 달리 **네이버 전역 분류**라,
+# 미지정이면 주제별 탭·추천 경로에서 통째로 빠진다.
+# 2026-07-29 확인: 발행 19편이 전부 '주제 선택 안 함' 이었다(코드가 아예 안 건드렸다).
+# 참고로 색인이 잘 되는 원본 블로그 made-us 는 '인테리어·DIY' 를 쓴다.
+TOPIC_BY_SEG = {
+    "a": "방송",             # BJ/스트리머 방송 소품
+    "b": "비즈니스·경제",     # 클럽·주류 브랜드 POSM(B2B)
+    "c": "인테리어·DIY",      # 간판·네온사인·아크릴 사인
+    "s": "방송",             # sample_bj-picket-guide (a 와 같은 BJ 글)
+}
+
+
+def _set_topic(page, draft_name: str) -> None:
+    """글의 '주제'를 세그먼트에 맞게 지정한다. 실패해도 발행은 계속한다."""
+    topic = TOPIC_BY_SEG.get((draft_name or "s")[0])
+    if not topic:
+        return
+    try:
+        btn = page.locator(SEL["topic_open"]).first
+        if topic in (btn.inner_text() or ""):
+            return
+        btn.click(timeout=3000)
+        _pause(0.3, 0.7)
+        page.get_by_text(topic, exact=True).first.click(timeout=3000)
+        _pause(0.2, 0.5)
+        # 선택 후 확인 버튼이 있으면 누른다(레이어 구현에 따라 없을 수도)
+        for sel in ("button:has-text('확인')", ".btn_confirm"):
+            try:
+                page.locator(sel).first.click(timeout=1200)
+                break
+            except Exception:
+                continue
+        _pause(0.2, 0.4)
+        now = (page.locator(SEL["topic_open"]).first.inner_text() or "").strip()
+        print(f"  주제: {now}" if topic in now else f"  ⚠ 주제 설정 확인 실패(현재 '{now}')")
+    except Exception as e:
+        print("  ⚠ 주제 설정 실패(주제 없이 발행):", e)
 
 
 def _pause(a=0.4, b=1.1):
@@ -410,6 +449,7 @@ def publish(draft_path: str, image_dir: str | None = None,
                             print(f"  ⚠ 카테고리 선택 확인 실패(현재 '{now}') — 기본 카테고리로 발행")
                 except Exception as e:
                     print("  ⚠ 카테고리 선택 실패(기본 카테고리로 발행):", e)
+            _set_topic(page, Path(draft_path).name)
             tag_ok = 0
             for tag in data["tags"]:
                 try:

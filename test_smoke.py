@@ -186,6 +186,13 @@ def t_parser():
     check("온토픽 0 이면 동음이의어 경보", _homo["homonym_risk"] is True)
     check("동음이의어 의심은 점수 절반",
           _opp.score(7, _homo) < _opp.score(7, dict(_homo, homonym_risk=False)))
+    # 글의 '주제'(네이버 전역 분류) — 미지정이면 주제별 탭·추천에서 통째로 빠진다.
+    # 2026-07-29 이전에는 발행 코드가 아예 안 건드려서 발행분 전체가 '주제 선택 안 함' 이었다.
+    from publish.naver import TOPIC_BY_SEG, _set_topic  # noqa: F401
+    check("세그먼트별 주제 매핑 존재",
+          all(TOPIC_BY_SEG.get(s) for s in ("a", "b", "c", "s")), TOPIC_BY_SEG)
+    check("BJ 글 주제는 '방송'", TOPIC_BY_SEG["a"] == "방송" and TOPIC_BY_SEG["s"] == "방송")
+    check("주제 설정 함수 존재", callable(_set_topic))
     check("제목이 있다", d["title"] and d["title"] != "제목 없음")
     check("태그 5개 이상", len(d["tags"]) >= 5, f"tags={len(d['tags'])}")
     check("본문 text 블록이 # 로 시작하지 않음",

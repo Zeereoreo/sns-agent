@@ -282,6 +282,81 @@ def add_tags(page, draft: str, post: dict, log_map: dict[str, str],
     return res
 
 
+def set_topic(page, draft: str, post: dict, log_map: dict[str, str], dry: bool) -> dict:
+    """이미 발행된 글에 '주제'(네이버 전역 분류)를 지정한다.
+
+    발행 코드가 주제를 아예 안 건드려서 발행분 전체가 '주제 선택 안 함' 이었다
+    (2026-07-29). 주제가 없으면 주제별 탭·추천 경로에서 통째로 빠진다.
+    """
+    from publish.naver import TOPIC_BY_SEG  # noqa: PLC0415
+
+    blog = config.NAVER_BLOG_ID
+    res = {"draft": draft, "added": 0, "ok": False, "reason": None}
+    topic = TOPIC_BY_SEG.get((draft or "s")[0])
+    if not topic:
+        res["reason"] = "세그먼트 없음"
+        return res
+    no = _log_no(post["url"]) or log_map.get(_norm(post["title"]))
+    if not no:
+        for cand in draft_title_candidates(draft):
+            k = _norm(cand)
+            no = log_map.get(k) or next(
+                (v for kk, v in log_map.items() if k and (k in kk or kk in k)), None)
+            if no:
+                break
+    if not no:
+        res["reason"] = "logNo 없음"
+        return res
+    try:
+        page.goto(f"https://blog.naver.com/{blog}/postupdate?logNo={no}", timeout=60000)
+        page.wait_for_timeout(3500)
+        for sel in (".se-popup-button-cancel", "button:has-text('취소')"):
+            try:
+                page.locator(sel).first.click(timeout=1500)
+                break
+            except Exception:
+                continue
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(600)
+        page.locator('[data-click-area="tpb.publish"]').first.click(timeout=8000)
+        page.wait_for_timeout(2200)
+
+        btn = page.locator("a[data-click-area='tpb*i.subject']").first
+        cur = (btn.inner_text() or "").strip()
+        if topic in cur:
+            res["ok"] = True
+            res["reason"] = f"이미 '{topic}'"
+            return res
+        if dry:
+            res["ok"] = True
+            res["added"] = 1
+            res["reason"] = f"dry-run: '{cur}' → '{topic}'"
+            return res
+        btn.click(timeout=4000)
+        page.wait_for_timeout(1200)
+        page.get_by_text(topic, exact=True).first.click(timeout=4000)
+        page.wait_for_timeout(800)
+        for sel in ("button:has-text('확인')", ".btn_confirm"):
+            try:
+                page.locator(sel).first.click(timeout=1200)
+                break
+            except Exception:
+                continue
+        page.wait_for_timeout(600)
+        now = (page.locator("a[data-click-area='tpb*i.subject']").first.inner_text() or "").strip()
+        if topic not in now:
+            res["reason"] = f"설정 실패(현재 '{now}')"
+            return res
+        page.locator('[data-click-area="tpb*i.publish"]').first.click(timeout=8000)
+        page.wait_for_timeout(6000)
+        res["ok"] = True
+        res["added"] = 1
+        res["reason"] = topic
+    except Exception as e:
+        res["reason"] = f"오류: {str(e)[:70]}"
+    return res
+
+
 def draft_tags(draft: str) -> list[str]:
     """초안 헤더의 '태그:' 줄을 읽는다. 글마다 태그가 다르므로 라이브 동기화에 쓴다."""
     p = ROOT / "drafts" / draft
@@ -328,6 +403,8 @@ def main() -> None:
                     help="발행된 글에 태그 추가(쉼표 구분). 예: 스트리머굿즈,스트리머굿즈제작")
     ap.add_argument("--sync-tags", action="store_true",
                     help="각 발행글에 **그 글 초안의 태그**를 반영(글마다 다른 태그를 한 번에)")
+    ap.add_argument("--set-topic", action="store_true",
+                    help="발행글의 '주제'(네이버 전역 분류)를 세그먼트에 맞게 지정")
     ap.add_argument("--only", default=None, help="초안 접두사(예: c22)")
     ap.add_argument("--target", type=int, default=9)
     ap.add_argument("--dry-run", action="store_true")
@@ -358,6 +435,13 @@ def main() -> None:
             for d, p in items:
                 no = _log_no(p["url"]) or log_map.get(_norm(p["title"])) or "-"
                 print(f"  {d[:32]:34} logNo={no}")
+            ctx.close()
+            return
+        if a.set_topic:
+            for d, p in items:
+                r = set_topic(page, d, p, log_map, a.dry_run)
+                mark = "OK " if r["ok"] else "FAIL"
+                print(f"[{mark}] {d[:32]:34} {r['reason'] or ''}")
             ctx.close()
             return
         if a.add_tags or a.sync_tags:
