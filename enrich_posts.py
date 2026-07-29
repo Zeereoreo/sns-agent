@@ -379,7 +379,9 @@ def _insert_heading_before(page, heading: str, follow: str) -> int:
     """`follow` 문단 앞에 `heading` 문단을 새로 만든다. 만든 문단 index 를 돌려준다(-1=실패)."""
     if not follow:
         return -1
-    key = follow[:18]
+    # 다음 문단이 리스트 항목이면 초안엔 '- ' 가 붙어 있지만 에디터는 그걸 빼고 렌더한다.
+    # 그대로 대조하면 못 찾아서 삽입이 조용히 실패한다(sample 에서 2개를 놓쳤다).
+    key = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", follow)[:18]
     idx = page.evaluate("""(k) => {
         const ps = document.querySelectorAll('.se-text-paragraph');
         for (let i = 0; i < ps.length; i++) {
