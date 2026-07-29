@@ -198,6 +198,17 @@ def t_parser():
     check("발행 결과 점검 함수 존재", callable(_audit_live_post))
     check("점검 JS 가 소제목·태그를 센다",
           "se-sectionTitle" in _LIVE_JS and "tags" in _LIVE_JS)
+
+    # '지금 할 일 1가지' — 문제가 여럿이면 가장 앞선 전제(색인 > 세션 > 발행)부터
+    import diagnostics as _diag
+    _cs = [{"name": "키워드 중복", "level": "warn", "detail": "", "fix": ""},
+           {"name": "네이버 색인", "level": "bad", "detail": "", "fix": ""},
+           {"name": "네이버 세션", "level": "bad", "detail": "", "fix": ""}]
+    check("색인이 세션보다 먼저", _diag.next_action(_cs)["name"] == "네이버 색인")
+    check("bad 가 warn 보다 먼저",
+          _diag.next_action([_cs[0], _cs[2]])["name"] == "네이버 세션")
+    check("문제 없으면 None", _diag.next_action(
+        [{"name": "x", "level": "ok", "detail": "", "fix": ""}]) is None)
     check("제목이 있다", d["title"] and d["title"] != "제목 없음")
     check("태그 5개 이상", len(d["tags"]) >= 5, f"tags={len(d['tags'])}")
     check("본문 text 블록이 # 로 시작하지 않음",
