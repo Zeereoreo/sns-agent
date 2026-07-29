@@ -906,6 +906,22 @@ def run_diagnostics(d) -> list[dict]:
     else:
         add("대상 블로그", "bad", "NAVER_BLOG_ID 미설정", ".env 에 NAVER_BLOG_ID 지정")
 
+    # 1-1) ★네이버 색인 — 순위보다 앞선 전제. 색인이 0 이면 나머지 지표는 전부 무의미하다.
+    # (2026-07-29: 2주·18편 동안 색인 0 인 것을 아무도 모르고 있었다.)
+    idx = _load_json(ROOT / "data" / "metrics.json", {}).get("index_status")
+    if not idx:
+        add("네이버 색인", "warn", "점검 데이터 없음(다음 수집 시 생성)")
+    elif idx.get("found", 0) == 0:
+        add("네이버 색인", "bad",
+            f"발행글 {idx.get('sampled')}편을 제목으로 검색해도 안 나옴 — **검색 미색인**",
+            "색인 전에는 키워드·태그·순위 작업이 효과 없음. 블로그 활동성·개설 경과 확인")
+    elif idx.get("found", 0) < idx.get("sampled", 1):
+        add("네이버 색인", "warn",
+            f"표본 {idx['sampled']}편 중 {idx['found']}편만 색인됨 ({idx.get('checked','')})")
+    else:
+        add("네이버 색인", "ok",
+            f"표본 {idx['sampled']}편 전부 색인됨 ({idx.get('checked','')})")
+
     # 2) 세션
     sv = _session_view(d)
     if sv is None:

@@ -122,6 +122,44 @@ def _rank_of(page, keyword: str, blog: str) -> tuple[int | None, int]:
     return rank, len(order)
 
 
+def _indexed_count(page, blog: str, titles: list[str]) -> dict | None:
+    """발행글 제목을 그대로 검색해 **네이버가 우리 글을 색인했는지** 본다.
+
+    2026-07-29 에 made-us2 가 2주·18편 동안 **한 편도 색인되지 않은 것**을 뒤늦게
+    발견했다. 순위·키워드·태그는 전부 색인이 됐다는 전제 위에서만 의미가 있는데,
+    그 전제를 아무도 확인하지 않고 있었다. 제목 정확 검색은 색인만 돼 있으면
+    거의 반드시 잡히므로, 색인 여부의 가장 싼 시험지다.
+
+    반환 {sampled, found, titles_found}. 수집 자체가 실패하면 None(0 으로 적지 않는다).
+    """
+    if not titles:
+        return None
+    found, checked = [], 0
+    for t in titles:
+        try:
+            page.goto("https://search.naver.com/search.naver?ssc=tab.blog.all"
+                      f"&query={quote(t)}", timeout=30000)
+            page.wait_for_timeout(1500)
+            ids = page.evaluate("""() => {
+              const out=[];
+              for (const a of document.querySelectorAll('a[href*="blog.naver.com"]')) {
+                const m=a.href.match(/blog\\.naver\\.com\\/([a-zA-Z0-9_-]+)/);
+                if(m) out.push(m[1]);
+              }
+              return Array.from(new Set(out));
+            }""")
+        except Exception:
+            continue
+        if not ids:          # SERP 가 비었으면 스크래핑 실패 — 표본에서 뺀다
+            continue
+        checked += 1
+        if blog in ids:
+            found.append(t)
+    if not checked:
+        return None
+    return {"sampled": checked, "found": len(found), "titles_found": found}
+
+
 def _session_ok(page, blog: str) -> bool | None:
     """write 페이지가 로그인으로 튕기지 않으면 세션 유효. 판단 불가 시 None."""
     try:
@@ -198,6 +236,34 @@ def _external_indexed(page, blog: str) -> int | None:
         return None
 
 
+def _recent_titles(n: int = 3) -> list[str]:
+    """최근 발행 성공 글의 제목(중복 제거). 색인 시험용 표본."""
+    state = _load(ROOT / "data" / "publish_state.json", {})
+    out = []
+    for e in reversed(state.get("log", [])):
+        if e.get("ok") and not e.get("dry") and e.get("title"):
+            if e["title"] not in out:
+                out.append(e["title"])
+        if len(out) >= n:
+            break
+    return out
+
+
+def _warn_not_indexed(today: str, sampled: int) -> None:
+    """색인 0 — 발행을 아무리 해도 검색 유입이 안 생기는 상태라 즉시 알린다."""
+    try:
+        import notify  # noqa: PLC0415
+        notify.notify("SNS Agent 색인 안 됨",
+                      f"발행글 {sampled}편을 제목으로 검색해도 우리 블로그가 안 나옵니다.")
+        notify.write_alert(
+            f"네이버 색인이 확인되지 않습니다({today} 점검).\n"
+            f"발행글 {sampled}편의 제목을 그대로 검색해도 우리 블로그가 나오지 않습니다.\n\n"
+            f"색인이 안 되면 키워드·태그·순위 작업은 전부 효과가 없습니다.\n"
+            f"블로그 활동성(이웃·댓글)과 개설 경과 기간을 확인하세요.\n")
+    except Exception as e:
+        print("색인 경고 실패:", e)
+
+
 def _warn_session_expired(today: str) -> None:
     """세션 만료를 즉시 알린다(트레이 풍선 + 바탕화면 경고). 발행 실패를 기다리지 않는다."""
     try:
@@ -257,6 +323,19 @@ def collect(force_ranks: bool = False) -> dict:
                 print(f"[순위] 전건 수집 실패({failures}) — 오늘 순위 기록 보류.")
         elif not need_ranks:
             print("[순위] 오늘 이미 수집됨(건너뜀). 강제: --ranks")
+
+        # ★네이버 색인 여부(하루 1회). 순위보다 앞선 전제 — 색인이 0 이면 순위는 없다.
+        if need_ranks:
+            titles = _recent_titles(3)
+            idx = _indexed_count(page, blog, titles)
+            if idx is not None:
+                idx["checked"] = f"{today} {datetime.now():%H:%M}"
+                data["index_status"] = idx
+                print(f"[색인] 제목검색 {idx['found']}/{idx['sampled']}편 확인")
+                if idx["found"] == 0:
+                    _warn_not_indexed(today, idx["sampled"])
+            else:
+                print("[색인] 수집 실패 — 기록 보류")
 
         # 외부 검색엔진 색인 수(하루 1회) — 네이버 밖 유입 가능성을 추적
         if need_ranks:
