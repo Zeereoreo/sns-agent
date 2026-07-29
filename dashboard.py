@@ -855,21 +855,38 @@ def page_seo(d) -> str:
         rows += (f"<tr><td><a href='/post?file={e(q['name'])}'>{e(q['name'])}</a></td>"
                  f"<td><span class='badge {gc}'>{seo['grade']} {seo['score']}</span></td>"
                  f"<td class='muted'>{st}</td><td class='muted'>{e(weak)}</td></tr>")
-    # 경쟁 분석(저장된 research)
+    # 경쟁 분석(저장된 research) — 길이만 보면 '왜 지는지'를 못 본다.
+    # 1등의 실제 규격(이미지·소제목·태그)과 우리에게 없는 태그, 구글 상위까지 같이 띄운다.
     comp = ""
     for kw, r in _load_research().items():
-        gaps = ", ".join(r.get("gap_terms", [])) or "—"
-        b = r.get("length_benchmark")
-        comp += (f"<tr><td>{e(kw)}</td><td class='muted'>{len(r.get('competitors', []))}편</td>"
-                 f"<td class='muted'>{b if b else '-'}자</td><td class='muted'>{e(gaps)}</td></tr>")
-    comp = comp or "<tr><td colspan=4 class='muted'>아직 분석 데이터 없음(발행 시 자동 수집)</td></tr>"
+        cs = r.get("competitors") or []
+        top = cs[0] if cs else {}
+        spec = "—"
+        if top:
+            spec = (f"{top.get('length', '?')}자 · 이미지 {top.get('images') or 0} · "
+                    f"소제목 {top.get('headings') or 0} · 태그 {len(top.get('tags') or [])}")
+        miss = ", ".join("#" + t for t in (r.get("missing_tags") or [])[:6]) or "—"
+        g = r.get("google") or []
+        gtxt = "—"
+        if g:
+            nb = [x for x in g if "blog.naver.com" in (x.get("url") or "")]
+            gtxt = f"{len(g)}건 중 네이버블로그 {len(nb)}"
+            if nb:
+                gtxt += f" (최고 #{min(x['rank'] for x in nb)})"
+        comp += (f"<tr><td>{e(kw)}</td>"
+                 f"<td class='muted'>{e(top.get('id', '—'))}</td>"
+                 f"<td class='muted'>{e(spec)}</td>"
+                 f"<td class='muted'>{e(miss)}</td>"
+                 f"<td class='muted'>{e(gtxt)}</td></tr>")
+    comp = comp or "<tr><td colspan=5 class='muted'>아직 분석 데이터 없음(발행 시 자동 수집)</td></tr>"
     return (_next_seo_panel(d)
             + "<h2>전체 초안 SEO 점수 (낮은 순)</h2>"
             + "<div class=scroll><table><tr><th>초안</th><th>점수</th><th>상태</th>"
             + f"<th>보강 포인트</th></tr>{rows}</table></div>"
-            + "<h2>경쟁 글 분석 (키워드별)</h2>"
-            + "<table><tr><th>타깃 검색어</th><th>경쟁글</th><th>길이중앙값</th>"
-            + f"<th>보강 후보 단어</th></tr>{comp}</table>")
+            + "<h2>경쟁 1등 벤치마크 (키워드별)</h2>"
+            + "<div class=scroll><table><tr><th>타깃 검색어</th><th>네이버 1등</th>"
+            + "<th>1등 규격</th><th>우리에게 없는 태그</th>"
+            + f"<th>구글 상위</th></tr>{comp}</table></div>")
 
 
 def _session_view(d):
