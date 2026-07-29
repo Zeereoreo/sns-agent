@@ -180,6 +180,9 @@ def _external_indexed(page, blog: str) -> int | None:
     구글은 자동 조회를 차단하므로(검색 결과 대신 차단 페이지를 준다) 같은 웹 크롤 기반인
     DuckDuckGo(빙 인덱스)로 대신 잰다. **구글 순위가 아니라 '색인 여부' 프록시**다.
     실패하면 None — 0 으로 적어 가짜 하락을 만들지 않는다.
+
+    DDG 는 봇 차단을 **HTTP 200 + 캡차 페이지**로 준다("Select all squares containing a duck").
+    그대로 세면 0 편이 나와 '색인 안 됨'으로 읽히는 가짜 데이터가 된다 → 차단 페이지는 None.
     """
     try:
         q = quote(f"site:blog.naver.com {blog}")
@@ -188,6 +191,8 @@ def _external_indexed(page, blog: str) -> int | None:
         if not r.ok:
             return None
         html = r.text()
+        if "anomaly" in html or "error-lite@duckduckgo.com" in html:
+            return None
         return len(set(re.findall(rf"blog\.naver\.com/{re.escape(blog)}/(\d{{6,}})", html)))
     except Exception:
         return None
