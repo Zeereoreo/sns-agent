@@ -145,6 +145,9 @@ def t_parser():
     check("하루 편집 한도 있음", 1 <= _ep.EDIT_MAX_PER_DAY <= 30, _ep.EDIT_MAX_PER_DAY)
     check("편집 사이 대기 있음", min(_ep.EDIT_PAUSE_SEC) >= 5, _ep.EDIT_PAUSE_SEC)
     check("편집 카운터 함수", callable(_ep._edits_today) and callable(_ep._record_edit))
+    # 색인이 0 인 동안은 라이브 편집 금지 — 대량 편집이 색인을 날린 전력이 있다(7/28)
+    check("색인 게이트 존재", callable(_ep._index_ok))
+    check("--force 는 게이트를 통과", _ep._index_ok(force=True) is True)
 
     # 세션 만료 사전 경고: 죽고 나서가 아니라 미리 알아야 발행이 안 멈춘다
     import metrics as _m

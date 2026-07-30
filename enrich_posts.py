@@ -607,6 +607,35 @@ def fix_headings(page, draft: str, post: dict, log_map: dict[str, str], dry: boo
     return res
 
 
+def _index_ok(force: bool = False) -> bool:
+    """색인이 살아 있을 때만 라이브 편집을 허용한다.
+
+    ★2026-07-30 실측(Creator Advisor 검색유입):
+      7/21~27 매일 검색유입 있었고 **7/26 에 5명으로 정점**을 찍었다(7일 합 13명).
+      그런데 7/28 부터 **0**. 그 경계에 내가 한 발행글 대량 편집이 있다
+      (7/27~28 사진 14편 보강, 7/29 postupdate 70회 이상).
+      제목 정확 검색으로도 0/16편 — 색인이 '아직 안 된' 게 아니라 **빠진** 것이다.
+    발행글을 고치면 재수집 대기에 들어가고, 대량이면 자동화로 보인다.
+    회복 전에 또 편집하면 같은 구덩이를 판다 → 색인 0 이면 **편집을 막는다**.
+    새 글 발행은 정상 활동이므로 제한하지 않는다.
+    """
+    if force:
+        print("[경고] --force 로 색인 게이트를 무시합니다. 편집이 색인을 다시 날릴 수 있습니다.")
+        return True
+    try:
+        m = json.loads((ROOT / "data" / "metrics.json").read_text(encoding="utf-8"))
+        idx = m.get("index_status") or {}
+    except Exception:
+        return True                      # 판단 근거가 없으면 막지 않는다
+    if idx.get("sampled") and idx.get("found", 0) == 0:
+        print("[중단] 네이버 색인이 확인되지 않는 상태입니다"
+              f"(제목검색 {idx['found']}/{idx['sampled']}편, {idx.get('checked','')}).")
+        print("       발행글 편집은 재수집 대기를 만들고, 대량 편집이 색인을 날린 전력이 있습니다.")
+        print("       색인이 돌아온 뒤에 하세요. 정말 필요하면 --force.")
+        return False
+    return True
+
+
 def _run_edits(page, items, log_map, args, do_one, fmt=None) -> None:
     """라이브 편집 루프 — **총량 제한과 대기를 강제한다**.
 
@@ -620,6 +649,8 @@ def _run_edits(page, items, log_map, args, do_one, fmt=None) -> None:
     import time as _t
 
     dry = bool(getattr(args, "dry_run", False))
+    if not dry and not _index_ok(getattr(args, "force", False)):
+        return
     done_today = 0 if dry else _edits_today()
     room_day = EDIT_MAX_PER_DAY - done_today
     if not dry and room_day <= 0:
@@ -697,6 +728,8 @@ def main() -> None:
     ap.add_argument("--only", default=None, help="초안 접두사(예: c22)")
     ap.add_argument("--target", type=int, default=9)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--force", action="store_true",
+                    help="색인 게이트 무시(권장하지 않음 — 편집이 색인을 날린 전력이 있음)")
     ap.add_argument("--list", action="store_true")
     a = ap.parse_args()
 
