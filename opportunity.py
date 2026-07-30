@@ -98,9 +98,17 @@ def _demand(page, kw: str) -> tuple[int, list[str]]:
         return -1, []
 
 
-def _serp(page, kw: str) -> list[dict]:
-    """블로그탭 상위 결과의 (블로그ID, 제목)."""
-    url = f"https://search.naver.com/search.naver?ssc=tab.blog.all&query={quote(kw)}"
+def _serp(page, kw: str, mobile: bool = True) -> list[dict]:
+    """블로그탭 상위 결과의 (블로그ID, 제목).
+
+    ★2026-07-30 부터 **모바일** 기준. 실측 유입 referrer 가 거의 전부
+    `m.search.naver.com` 이었는데 우리는 PC SERP 로 경쟁을 재고 있었다.
+    둘은 결과 수가 크게 다르다 — 같은 날 실측:
+      vip피켓 모바일 **1건** vs PC 24건 · led 응원 피켓 3 vs 23 · 아크릴 메뉴판 4 vs 22.
+    PC 로 '경쟁 24건'이라 포기한 키워드가 모바일에서는 비어 있었다.
+    """
+    host = "m.search.naver.com" if mobile else "search.naver.com"
+    url = f"https://{host}/search.naver?ssc=tab.blog.all&query={quote(kw)}"
     try:
         page.goto(url, timeout=30000)
         page.wait_for_timeout(1400)

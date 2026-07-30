@@ -96,10 +96,16 @@ def _visitor_counts(page) -> dict:
             "total": int(m.group(2).replace(",", ""))}
 
 
-def _rank_of(page, keyword: str, blog: str) -> tuple[int | None, int]:
+def _rank_of(page, keyword: str, blog: str, mobile: bool = True) -> tuple[int | None, int]:
     """(순위, SERP에서 확인된 블로그 결과 수) 반환.
-    결과 수가 0이면 스크래핑 실패/차단 가능성 → 호출측이 '순위 이탈'로 오기록하지 않는다."""
-    url = f"https://search.naver.com/search.naver?ssc=tab.blog.all&query={quote(keyword)}"
+    결과 수가 0이면 스크래핑 실패/차단 가능성 → 호출측이 '순위 이탈'로 오기록하지 않는다.
+
+    ★기본을 **모바일**로 둔다(2026-07-30). 실측 유입 referrer 가 거의 전부
+    `m.search.naver.com` 이었는데 우리는 PC SERP 로만 순위를 재고 있었다 —
+    모바일과 PC 는 결과가 다르므로 **엉뚱한 화면을 보고 순위를 판단**하고 있었다.
+    """
+    host = "m.search.naver.com" if mobile else "search.naver.com"
+    url = f"https://{host}/search.naver?ssc=tab.blog.all&query={quote(keyword)}"
     try:
         page.goto(url, timeout=30000)
         page.wait_for_timeout(1500)
@@ -153,6 +159,56 @@ def _search_inflow(page, blog: str) -> dict | None:
         return out or None
     except Exception:
         return None
+
+
+def _inflow_queries(page, blog: str) -> dict | None:
+    """**실제로 사람들이 무엇을 검색해서 들어왔는지.** 우리가 가진 유일한 정답지다.
+
+    2026-07-30 에 처음 봤다. 열흘 동안 자동완성 '수요 프록시'로 키워드를 고르면서
+    정작 실측 유입어를 안 보고 있었다. 실제 유입어는 이랬다:
+      7/21 LED피켓 · 7/23 led 피켓 제작/아크릴 메뉴판 · 7/26 vip피켓·led 응원 피켓·
+      휴대용led응원피켓 · 7/27 led 응원 피켓·비제이 전광판 구매
+    → 거의 전부 **모바일 검색(m.search.naver.com)** 이고 **BJ/피켓 계열**이다.
+      자동완성 프록시는 '휴대용led응원피켓' 같은 롱테일을 아예 못 잡는다.
+
+    API 를 직접 부르면 403 이다(x-ca-sig 서명 헤더 필요) → **SPA 응답을 가로챈다.**
+    반환 {YYYY-MM-DD: [{q, ratio}]}.
+    """
+    got: dict[str, list] = {}
+
+    def on_resp(r):
+        if "/api/v6/inflow-analysis/referrer-query-rank" not in r.url:
+            return
+        try:
+            rows = json.loads(r.text()).get("data") or []
+        except Exception:
+            return
+        for row in rows:
+            top = [{"q": t.get("searchQuery"), "ratio": round(t.get("ratio", 0), 3)}
+                   for t in (row.get("topN") or []) if t.get("searchQuery")]
+            if top:
+                got[row.get("date")] = top
+
+    page.on("response", on_resp)
+    try:
+        page.goto(f"https://creator-advisor.naver.com/naver_blog/{blog}"
+                  "/inflow-analysis#by-rq-count", timeout=45000)
+        page.wait_for_timeout(6000)
+        # 며칠치를 더 훑는다(하루만 보면 표본이 1~2건이라 아무것도 못 읽는다)
+        for _ in range(6):
+            try:
+                page.get_by_text("이전 기간 조회", exact=False).first.click(timeout=3500)
+                page.wait_for_timeout(2500)
+            except Exception:
+                break
+    except Exception:
+        pass
+    finally:
+        try:
+            page.remove_listener("response", on_resp)
+        except Exception:
+            pass
+    return got or None
 
 
 def _indexed_count(page, blog: str, titles: list[str]) -> dict | None:
@@ -367,6 +423,15 @@ def collect(force_ranks: bool = False) -> dict:
                       f"(조회 {si[latest]['cv']})")
             else:
                 print("[검색유입] 수집 실패 — 기록 보류")
+
+            # ★실제 유입 검색어 — 우리가 가진 유일한 정답지
+            iq = _inflow_queries(page, blog)
+            if iq:
+                data.setdefault("inflow_queries", {}).update(iq)
+                allq = [t["q"] for v in iq.values() for t in v]
+                print(f"[유입검색어] {len(iq)}일치 · {', '.join(dict.fromkeys(allq))[:90]}")
+            else:
+                print("[유입검색어] 수집 실패 — 기록 보류")
 
         # ★네이버 색인 여부(하루 1회). 순위보다 앞선 전제 — 색인이 0 이면 순위는 없다.
         if need_ranks:

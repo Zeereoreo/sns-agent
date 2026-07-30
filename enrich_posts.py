@@ -619,20 +619,17 @@ def _index_ok(force: bool = False) -> bool:
     회복 전에 또 편집하면 같은 구덩이를 판다 → 색인 0 이면 **편집을 막는다**.
     새 글 발행은 정상 활동이므로 제한하지 않는다.
     """
-    if force:
-        print("[경고] --force 로 색인 게이트를 무시합니다. 편집이 색인을 다시 날릴 수 있습니다.")
-        return True
     try:
         m = json.loads((ROOT / "data" / "metrics.json").read_text(encoding="utf-8"))
         idx = m.get("index_status") or {}
     except Exception:
         return True                      # 판단 근거가 없으면 막지 않는다
     if idx.get("sampled") and idx.get("found", 0) == 0:
-        print("[중단] 네이버 색인이 확인되지 않는 상태입니다"
-              f"(제목검색 {idx['found']}/{idx['sampled']}편, {idx.get('checked','')}).")
-        print("       발행글 편집은 재수집 대기를 만들고, 대량 편집이 색인을 날린 전력이 있습니다.")
-        print("       색인이 돌아온 뒤에 하세요. 정말 필요하면 --force.")
-        return False
+        # 2026-07-30 사용자 지시로 **차단이 아니라 경고**. 편집 자체는 허용하되,
+        # 대량으로 몰아치지 않게 총량 제한(EDIT_MAX_*)은 그대로 건다 —
+        # 세션이 두 번 끊긴 게 '한 번에 많이' 했기 때문이지 편집 자체 때문이 아니다.
+        print(f"[주의] 색인 미확인 상태입니다(제목검색 {idx['found']}/{idx['sampled']}편,"
+              f" {idx.get('checked','')}). 편집은 진행하되 소량·간격을 지킵니다.")
     return True
 
 

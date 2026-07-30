@@ -203,9 +203,10 @@ def _analyze_on(page, arg: str, google: bool) -> dict:
     except Exception:
         pass
 
-    # 상위 블로그 글
-    page.goto(f"https://search.naver.com/search.naver?ssc=tab.blog.all&query={quote(keyword)}",
-              timeout=30000)
+    # 상위 블로그 글 — **모바일** 기준(2026-07-30). 실측 유입이 전부 m.search 였고
+    # 모바일은 결과 수가 PC 의 1/5 수준이라, PC 로 보면 없는 빈틈을 놓친다.
+    page.goto("https://m.search.naver.com/search.naver"
+              f"?ssc=tab.blog.all&query={quote(keyword)}", timeout=30000)
     page.wait_for_timeout(1500)
     posts = page.evaluate("""() => {
       const out=[], seen=new Set();

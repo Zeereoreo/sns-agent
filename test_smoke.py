@@ -145,9 +145,18 @@ def t_parser():
     check("하루 편집 한도 있음", 1 <= _ep.EDIT_MAX_PER_DAY <= 30, _ep.EDIT_MAX_PER_DAY)
     check("편집 사이 대기 있음", min(_ep.EDIT_PAUSE_SEC) >= 5, _ep.EDIT_PAUSE_SEC)
     check("편집 카운터 함수", callable(_ep._edits_today) and callable(_ep._record_edit))
-    # 색인이 0 인 동안은 라이브 편집 금지 — 대량 편집이 색인을 날린 전력이 있다(7/28)
-    check("색인 게이트 존재", callable(_ep._index_ok))
-    check("--force 는 게이트를 통과", _ep._index_ok(force=True) is True)
+    # 색인 미확인이면 경고만 하고 진행(2026-07-30 사용자 지시). 차단은 총량 제한이 맡는다.
+    check("색인 경고 함수 존재", callable(_ep._index_ok))
+    check("색인 미확인이어도 편집 허용", _ep._index_ok() is True)
+
+    # 순위·경쟁 측정은 **모바일** 기준이어야 한다(실측 유입이 전부 m.search 였다)
+    import inspect
+
+    import metrics as _mt
+    import opportunity as _op
+    check("순위 측정 기본이 모바일", "m.search.naver.com" in inspect.getsource(_mt._rank_of))
+    check("기회 SERP 가 모바일", "m.search.naver.com" in inspect.getsource(_op._serp))
+    check("유입 검색어 수집 함수", callable(_mt._inflow_queries))
 
     # 세션 만료 사전 경고: 죽고 나서가 아니라 미리 알아야 발행이 안 멈춘다
     import metrics as _m
