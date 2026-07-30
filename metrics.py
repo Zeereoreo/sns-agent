@@ -122,6 +122,39 @@ def _rank_of(page, keyword: str, blog: str) -> tuple[int | None, int]:
     return rank, len(order)
 
 
+def _search_inflow(page, blog: str) -> dict | None:
+    """네이버 크리에이터 어드바이저에서 **검색 유입수**를 가져온다.
+
+    방문자 누계는 이웃·우리 자신·직접 유입이 섞여 실제 성장을 못 보여준다.
+    성장 목표는 '검색으로 들어오는 사람'이고, 그 수치는 이 API 에만 있다.
+    2026-07-30 에 처음 재보니 7/21~27 매일 있었고(7일 합 13명, 7/26 정점 5명)
+    **7/28 부터 0** 이었다 — 내 대량 편집 경계와 일치. 이걸 안 재고 있었다.
+
+    반환 {YYYY-MM-DD: {"cv":조회, "uv":순방문, "search":검색유입}} (직전 2일).
+    SPA 전용 헤더가 필요해 page.request 로는 403 이라 **페이지 안 fetch** 로 부른다.
+    """
+    try:
+        page.goto(f"https://creator-advisor.naver.com/naver_blog/{blog}", timeout=35000)
+        page.wait_for_timeout(3500)
+        body = page.evaluate(
+            """async (url) => {
+                const r = await fetch(url, {credentials: 'include'});
+                return {s: r.status, b: await r.text()};
+            }""",
+            f"https://creator-advisor.naver.com/api/v6/home/yesterday-summary"
+            f"?channelId={blog}&service=naver_blog&date={date.today().isoformat()}")
+        if body.get("s") != 200:
+            return None
+        d = json.loads(body["b"])["data"]
+        out = {}
+        for i, day in enumerate(d.get("date") or []):
+            out[day] = {"cv": d["cv"]["cv"][i], "uv": d["cv"]["uv"][i],
+                        "search": d["searchInflow"]["searchInflow"][i]}
+        return out or None
+    except Exception:
+        return None
+
+
 def _indexed_count(page, blog: str, titles: list[str]) -> dict | None:
     """발행글 제목을 그대로 검색해 **네이버가 우리 글을 색인했는지** 본다.
 
@@ -323,6 +356,17 @@ def collect(force_ranks: bool = False) -> dict:
                 print(f"[순위] 전건 수집 실패({failures}) — 오늘 순위 기록 보류.")
         elif not need_ranks:
             print("[순위] 오늘 이미 수집됨(건너뜀). 강제: --ranks")
+
+        # ★검색 유입(하루 1회) — 방문자 누계가 아니라 **이것**이 성장 지표다.
+        if need_ranks:
+            si = _search_inflow(page, blog)
+            if si:
+                data.setdefault("search_inflow", {}).update(si)
+                latest = sorted(si)[-1]
+                print(f"[검색유입] {latest} {si[latest]['search']}명 "
+                      f"(조회 {si[latest]['cv']})")
+            else:
+                print("[검색유입] 수집 실패 — 기록 보류")
 
         # ★네이버 색인 여부(하루 1회). 순위보다 앞선 전제 — 색인이 0 이면 순위는 없다.
         if need_ranks:

@@ -906,15 +906,38 @@ def run_diagnostics(d) -> list[dict]:
     else:
         add("대상 블로그", "bad", "NAVER_BLOG_ID 미설정", ".env 에 NAVER_BLOG_ID 지정")
 
+    # 1-0) ★검색 유입 — 방문자 누계가 아니라 이것이 성장 지표다.
+    si = _load_json(ROOT / "data" / "metrics.json", {}).get("search_inflow") or {}
+    if not si:
+        add("검색 유입", "warn", "아직 수집 안 됨(다음 수집 시 생성)")
+    else:
+        days = sorted(si)[-7:]
+        vals = [si[d]["search"] for d in days]
+        trend = " ".join(str(v) for v in vals)
+        # 합계가 아니라 **연속 0의 길이**를 본다(합계로 보면 앞쪽 숫자가 0을 가린다).
+        zeros = 0
+        for v in reversed(vals):
+            if v:
+                break
+            zeros += 1
+        if zeros >= 2:
+            add("검색 유입", "bad", f"**{zeros}일 연속 0명** (최근 7일: {trend})",
+                "발행글 편집 금지 상태. 새 글 발행만 이어가며 회복 관찰")
+        elif zeros == 1:
+            add("검색 유입", "warn", f"어제 0명 (최근 7일: {trend})")
+        else:
+            add("검색 유입", "ok", f"어제 {vals[-1]}명 (최근 7일: {trend})")
+
     # 1-1) ★네이버 색인 — 순위보다 앞선 전제. 색인이 0 이면 나머지 지표는 전부 무의미하다.
     # (2026-07-29: 2주·18편 동안 색인 0 인 것을 아무도 모르고 있었다.)
     idx = _load_json(ROOT / "data" / "metrics.json", {}).get("index_status")
     if not idx:
         add("네이버 색인", "warn", "점검 데이터 없음(다음 수집 시 생성)")
     elif idx.get("found", 0) == 0:
+        # 7/26 에 검색으로 5명이 들어왔으므로 '아직 색인 전'이 아니라 **빠진** 것이다.
         add("네이버 색인", "bad",
-            f"발행글 {idx.get('sampled')}편을 제목으로 검색해도 안 나옴 — **검색 미색인**",
-            "색인 전에는 키워드·태그·순위 작업이 효과 없음. 블로그 활동성·개설 경과 확인")
+            f"발행글 {idx.get('sampled')}편을 제목으로 검색해도 안 나옴 — **색인에서 빠짐**",
+            "7/26 까지는 색인돼 있었다(검색유입 5명). 발행글 편집을 멈추고 새 글만 올리며 회복 관찰")
     elif idx.get("found", 0) < idx.get("sampled", 1):
         add("네이버 색인", "warn",
             f"표본 {idx['sampled']}편 중 {idx['found']}편만 색인됨 ({idx.get('checked','')})")
