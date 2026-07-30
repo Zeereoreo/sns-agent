@@ -38,6 +38,30 @@ STATE = ROOT / "data" / "publish_state.json"
 # 경쟁 글이 12~20개를 쓰므로 20 까지 채운다 — 그 이상은 확인 안 된 영역이라 두지 않는다.
 TAG_MAX = 20
 
+# ★라이브 편집 총량 제한 (2026-07-30 추가 — 뼈아픈 근거)
+# 7/28 과 7/30 두 번 다 **발행글을 대량 편집한 직후 로그인 세션이 끊겼다**.
+# 만료가 아니다 — NID_AUT/NID_SES 가 만료일(8/27)을 한 달 남기고 삭제됐다.
+# 7/29 하루에 postupdate 를 70회 이상 열고 발행 버튼을 눌렀으니 자동화로 보였을 것이다.
+# 편집은 되돌릴 수 있지만 세션이 끊기면 **발행이 통째로 멈춘다** — 그쪽이 훨씬 비싸다.
+EDIT_MAX_PER_RUN = 6          # 한 번 실행에서 손댈 발행글 수
+EDIT_PAUSE_SEC = (8.0, 16.0)  # 글 사이 대기(사람 속도에 가깝게)
+EDIT_LOG = ROOT / "data" / ".live-edit-log"
+EDIT_MAX_PER_DAY = 12         # 하루 총량
+
+
+def _edits_today() -> int:
+    if not EDIT_LOG.exists():
+        return 0
+    today = str(__import__("datetime").date.today())
+    return sum(1 for ln in EDIT_LOG.read_text(encoding="utf-8").splitlines()
+               if ln.startswith(today))
+
+
+def _record_edit(draft: str) -> None:
+    import datetime as _dt
+    with EDIT_LOG.open("a", encoding="utf-8") as f:
+        f.write(f"{_dt.date.today()} {_dt.datetime.now():%H:%M} {draft}\n")
+
 
 def published_posts() -> dict[str, dict]:
     """초안 → {url, title}. 같은 초안이 여러 번 있으면 최신 발행 기록을 쓴다."""
@@ -583,6 +607,41 @@ def fix_headings(page, draft: str, post: dict, log_map: dict[str, str], dry: boo
     return res
 
 
+def _run_edits(page, items, log_map, args, do_one, fmt=None) -> None:
+    """라이브 편집 루프 — **총량 제한과 대기를 강제한다**.
+
+    7/28·7/30 두 번 다 발행글을 대량 편집한 직후 로그인 세션이 끊겼다(만료 아님 —
+    NID_AUT/NID_SES 가 만료일 한 달 전에 삭제됐다). 7/29 하루에 postupdate 를 70회 넘게
+    열었으니 자동화로 보였을 것이다. 편집은 다시 할 수 있지만 **세션이 끊기면 발행이
+    통째로 멈춘다** — 그쪽이 훨씬 비싸므로 느리게 가는 쪽을 택한다.
+    dry-run 은 발행하지 않으므로 제한하지 않는다.
+    """
+    import random
+    import time as _t
+
+    dry = bool(getattr(args, "dry_run", False))
+    done_today = 0 if dry else _edits_today()
+    room_day = EDIT_MAX_PER_DAY - done_today
+    if not dry and room_day <= 0:
+        print(f"[중단] 오늘 라이브 편집 {done_today}건으로 한도({EDIT_MAX_PER_DAY})를 채웠습니다.")
+        print("       세션 보호를 위해 내일 이어서 하세요.")
+        return
+    cap = len(items) if dry else min(EDIT_MAX_PER_RUN, room_day)
+    if not dry and len(items) > cap:
+        print(f"[제한] 대상 {len(items)}편 중 {cap}편만 처리합니다"
+              f"(1회 {EDIT_MAX_PER_RUN} · 오늘 남은 {room_day}). 나머지는 다시 실행하세요.")
+
+    for i, (d, p) in enumerate(items[:cap]):
+        r = do_one(page, d, p)
+        mark = "OK " if r.get("ok") else "FAIL"
+        detail = fmt(r) if fmt else (r.get("reason") or "")
+        print(f"[{mark}] {d[:32]:34} {detail}")
+        if not dry and r.get("ok") and r.get("added", 1):
+            _record_edit(d)
+        if i + 1 < cap and not dry:
+            _t.sleep(random.uniform(*EDIT_PAUSE_SEC))
+
+
 def draft_tags(draft: str) -> list[str]:
     """초안 헤더의 '태그:' 줄을 읽는다. 글마다 태그가 다르므로 라이브 동기화에 쓴다."""
     p = ROOT / "drafts" / draft
@@ -668,43 +727,36 @@ def main() -> None:
             ctx.close()
             return
         if a.sync_titles:
-            for d, p in items:
-                r = sync_title(page, d, p, log_map, a.dry_run)
-                mark = "OK " if r["ok"] else "FAIL"
-                print(f"[{mark}] {d[:32]:34} {r['reason'] or ''}")
+            _run_edits(page, items, log_map, a,
+                       lambda pg, d, p: sync_title(pg, d, p, log_map, a.dry_run))
             ctx.close()
             return
         if a.fix_headings:
-            for d, p in items:
-                r = fix_headings(page, d, p, log_map, a.dry_run)
-                mark = "OK " if r["ok"] else "FAIL"
-                print(f"[{mark}] {d[:32]:34} {r['reason'] or ''}")
+            _run_edits(page, items, log_map, a,
+                       lambda pg, d, p: fix_headings(pg, d, p, log_map, a.dry_run))
             ctx.close()
             return
         if a.set_topic:
-            for d, p in items:
-                r = set_topic(page, d, p, log_map, a.dry_run)
-                mark = "OK " if r["ok"] else "FAIL"
-                print(f"[{mark}] {d[:32]:34} {r['reason'] or ''}")
+            _run_edits(page, items, log_map, a,
+                       lambda pg, d, p: set_topic(pg, d, p, log_map, a.dry_run))
             ctx.close()
             return
         if a.add_tags or a.sync_tags:
             fixed_tags = ([t.strip() for t in a.add_tags.split(",") if t.strip()]
                           if a.add_tags else None)
-            for d, p in items:
+
+            def _tag_one(pg, d, p):
                 tags = fixed_tags if fixed_tags is not None else draft_tags(d)
                 if not tags:
-                    print(f"[SKIP] {d[:32]:34} 초안 태그 없음")
-                    continue
-                r = add_tags(page, d, p, log_map, tags, a.dry_run)
-                mark = "OK " if r["ok"] else "FAIL"
-                print(f"[{mark}] {d[:32]:34} +{r['added']}개  {r['reason'] or ''}")
+                    return {"ok": True, "added": 0, "reason": "초안 태그 없음"}
+                return add_tags(pg, d, p, log_map, tags, a.dry_run)
+
+            _run_edits(page, items, log_map, a, _tag_one)
             ctx.close()
             return
-        for d, p in items:
-            r = enrich(page, d, p, log_map, a.target, a.dry_run)
-            mark = "OK " if r["ok"] else "FAIL"
-            print(f"[{mark}] {d[:32]:34} {r['before']} → {r['after']}  {r['reason'] or ''}")
+        _run_edits(page, items, log_map, a,
+                   lambda pg, d, p: enrich(pg, d, p, log_map, a.target, a.dry_run),
+                   fmt=lambda r: f"{r.get('before')} → {r.get('after')}  {r.get('reason') or ''}")
         ctx.close()
 
 

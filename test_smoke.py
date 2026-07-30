@@ -139,6 +139,13 @@ def t_parser():
     check("상한 넘는 것뿐이면 그대로", _choose_title([over], "피켓", "w.md") == over)
     check("제목 상한 100", TITLE_NAVER_MAX == 100)
 
+    # 라이브 편집 총량 제한 — 대량 편집 직후 세션이 두 번 끊겼다(7/28·7/30)
+    import enrich_posts as _ep
+    check("1회 편집 한도 있음", 1 <= _ep.EDIT_MAX_PER_RUN <= 10, _ep.EDIT_MAX_PER_RUN)
+    check("하루 편집 한도 있음", 1 <= _ep.EDIT_MAX_PER_DAY <= 30, _ep.EDIT_MAX_PER_DAY)
+    check("편집 사이 대기 있음", min(_ep.EDIT_PAUSE_SEC) >= 5, _ep.EDIT_PAUSE_SEC)
+    check("편집 카운터 함수", callable(_ep._edits_today) and callable(_ep._record_edit))
+
     # 세션 만료 사전 경고: 죽고 나서가 아니라 미리 알아야 발행이 안 멈춘다
     import metrics as _m
     check("만료 사전경고 기준", _m.SESSION_WARN_DAYS >= 7, _m.SESSION_WARN_DAYS)
