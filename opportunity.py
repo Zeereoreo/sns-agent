@@ -60,7 +60,9 @@ PLATFORM_TAGS_ROTATE = ["#SOOP", "#팬더TV", "#플렉스TV", "#띵라이브", "
 # 자동완성은 동음이의어로 샌다 — '서포트' → 아치서포트(발 지지대)·핀서포트(건축 자재),
 # '커피차' → 커피창고(카페 이름), '응원봉' → 기아 응원봉(야구).
 # made-us 가 실제로 만드는 물건이 아닌 키워드는 아무리 수요가 커도 후보가 아니다.
-_PRODUCT = ("피켓", "전광판", "네온", "간판", "아크릴", "사인", "버킷", "메뉴판")
+# '굿즈'는 사용자가 명시적으로 요구한 카테고리이고 실제 우리 제품군이다
+# (스트리머 굿즈 = 방송에 쓰는 LED 굿즈). 게이트에 없어서 스캔에서 계속 잘려나갔다.
+_PRODUCT = ("피켓", "전광판", "네온", "간판", "아크릴", "사인", "버킷", "메뉴판", "굿즈")
 # made-us 가 만들지 않는 것 / 명백한 오프타겟(수요가 커도 제외)
 # '챌린지·기부'는 ALS 아이스버킷 챌린지 — 이름만 같고 제품이 아니다(2026-07-29 실제로
 # 0.748 점 기회 키워드 1위로 올라왔다). '가방·스텐저그'도 우리가 만드는 LED 버킷이 아니다.
@@ -132,7 +134,9 @@ def _serp(page, kw: str, mobile: bool = True) -> list[dict]:
 
 
 def _nospace(s: str) -> str:
-    return re.sub(r"\s+", "", s)
+    # 대소문자도 무시한다 — 'vvip피켓' 이 'VVIP피켓 VIP피켓…' 제목과 안 맞아
+    # 동음이의어로 오탐됐다(2026-07-30). LED/led, VIP/vip 가 섞여 쓰이는 판이다.
+    return re.sub(r"\s+", "", s).casefold()
 
 
 def diagnose(kw: str, items: list[dict]) -> dict:
@@ -145,7 +149,8 @@ def diagnose(kw: str, items: list[dict]) -> dict:
     # 온토픽 0/10 으로 잡혀 기회점수 0.806(2위)까지 올라갔었다(2026-07-29).
     # 붙여쓰기 변형을 자동 생성하는 기능과 겹쳐 상위 점수가 통째로 오염돼 있었다.
     ontopic = sum(1 for it in items
-                  if kwn in _nospace(it["title"]) or all(t in it["title"] for t in toks))
+                  if kwn in _nospace(it["title"])
+                  or all(t.casefold() in it["title"].casefold() for t in toks))
     local = sum(1 for it in items if _LOCAL.search(it["title"]))
     case = sum(1 for it in items if _CASE.search(it["title"]))
     info = sum(1 for it in items if _INFO.search(it["title"]))
@@ -156,14 +161,37 @@ def diagnose(kw: str, items: list[dict]) -> dict:
             "homonym_risk": bool(ontopic == 0 and len(items) >= 5)}
 
 
+SPARSE_N = 3        # 모바일 블로그탭 경쟁이 이 수 이하면 '비어 있는 판'
+
+
 def score(demand: int, d: dict) -> float:
-    """기회 점수. 수요가 있어야 하고, 지역 시공 후기 판이면 깎고, 빈틈이 있으면 올린다."""
-    if demand <= 0 or d["n"] == 0:
+    """기회 점수. 수요가 있어야 하고, 지역 시공 후기 판이면 깎고, 빈틈이 있으면 올린다.
+
+    ★2026-07-30 대수정 — '수요 0 이면 기회 0' 이 최대 오류였다.
+    자동완성 수요는 **프록시일 뿐**인데 그걸 관문으로 써서, 실제로 유입을 만든 키워드를
+    전부 0점으로 버리고 있었다. 실측 유입어(vip피켓·led 응원 피켓·비제이 전광판 구매)는
+    자동완성 수요가 0~4 였다. 그리고 이 판은 모바일 블로그탭 경쟁이 0~3건으로 비어 있다
+    (BJ/피켓 27개 중 21개). 경쟁이 없으면 검색량이 적어도 **그 소량이 전부 우리 것**이다.
+    → 수요 0 이어도 **경쟁이 비어 있으면 기회로 인정**한다.
+    """
+    sparse = d["n"] <= SPARSE_N and not d.get("homonym_risk")
+    if demand <= 0:
+        if sparse:
+            # 비어 있는 판: 경쟁이 적을수록 높게(0건이 최고). 0.60~0.75.
+            # 이 대역을 수요 있는 판보다 위에 두는 근거 — **실측 유입 6건 중 5건이
+            # 이런 '수요 0 · 경쟁 희소' 키워드에서 나왔다**(vip피켓·led 응원 피켓 등).
+            # 반면 자동완성 수요 9였던 '카페입간판'은 유입 0이었다.
+            # n==0 을 '기회 없음'으로 보면 안 된다 — 'LED피켓'은 지금 블로그 결과가 0건인데
+            # 7/21 에 그 키워드로 실제 유입이 있었다. 네이버가 쿼리별로 블로그 섹션 노출을
+            # 동적으로 정할 뿐, 자리가 비어 있다는 뜻이다.
+            return round(0.75 - 0.05 * d["n"], 3)
         return 0.0
     gap = 1.0 - (d["ontopic"] / max(d["n"], 1))       # 정조준 글이 적을수록 빈틈
     fit = 1.0 - d["local_ratio"]                      # 지역형이 많을수록 우리 자리 없음
     bonus = 1.0 + 0.3 * d["info_ratio"]               # 정보형이 통하는 판이면 가산
     s = min(demand, 10) / 10 * (0.35 + 0.65 * gap) * fit * bonus
+    if sparse:
+        s = max(s, 0.75 - 0.05 * d["n"])   # 수요까지 있는 빈 판은 최소한 빈 판만큼은 준다
     # 온토픽 0 은 최대 gap 을 받아 점수가 제일 높게 나오는데, 그 중 상당수가 동음이의어다.
     # 확신할 수 없으니 지우지는 않고 절반으로 깎아 '검토 대상'으로 남긴다(제목을 봐야 안다).
     if d.get("homonym_risk"):
@@ -184,8 +212,10 @@ def scan(seeds: list[str], max_candidates: int) -> None:
         cands: dict[str, int] = {}
         for s in seeds:
             n, sug = _demand(page, s)
-            if n > 0:
-                cands[s] = n
+            # ★시드는 수요와 무관하게 무조건 후보다(2026-07-30 수정).
+            # 'if n > 0' 때문에 수요 0 인 시드가 후보에 들지도 못했다 — 그런데 실측 유입을
+            # 만든 키워드가 정확히 그런 것들이다(vip피켓·리액션 피켓·비제이 전광판 구매).
+            cands[s] = max(n, 0)
             for w in sug:
                 w = w.strip()
                 if 3 <= len(w) <= 20 and w not in cands:
@@ -211,11 +241,16 @@ def scan(seeds: list[str], max_candidates: int) -> None:
         for kw in list(cands):
             if cands[kw] == -1:
                 cands[kw] = _demand(page, kw)[0]
-        alive = {k: v for k, v in cands.items() if v >= 2}
-        print(f"수요 2 이상: {len(alive)}개")
-
-        # 3) 수요 상위만 SERP 진단(무겁다)
-        top = sorted(alive.items(), key=lambda kv: -kv[1])[:max_candidates]
+        # ★수요 2 미만을 여기서 버리면 안 된다(2026-07-30 수정).
+        # 실측 유입을 만든 키워드(vip피켓·비제이 전광판 구매 등)는 자동완성 수요가 0 이라
+        # 이 필터에서 전부 잘려나가 **SERP 진단조차 못 받고** 있었다.
+        # 시드는 무조건 진단하고, 확장 후보는 수요 상위로 채운다.
+        seed_set = [k for k in cands if k in seeds]
+        rest = sorted(((k, v) for k, v in cands.items() if k not in seed_set),
+                      key=lambda kv: -kv[1])
+        top = [(k, cands[k]) for k in seed_set] + rest
+        top = top[:max_candidates]
+        print(f"진단 대상 {len(top)}개(시드 {len(seed_set)} + 확장 {len(top) - len(seed_set)})")
         rows = []
         for i, (kw, dem) in enumerate(top, 1):
             items = _serp(page, kw)

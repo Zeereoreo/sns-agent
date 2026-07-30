@@ -158,6 +158,17 @@ def t_parser():
     check("기회 SERP 가 모바일", "m.search.naver.com" in inspect.getsource(_op._serp))
     check("유입 검색어 수집 함수", callable(_mt._inflow_queries))
 
+    # ★수요 0 이어도 경쟁이 비어 있으면 기회다 — 실측 유입 6건 중 5건이 그런 키워드였다
+    _empty = {"n": 0, "ontopic": 0, "local": 0, "case": 0, "info": 0,
+              "local_ratio": 0, "info_ratio": 0, "homonym_risk": False}
+    _sparse = dict(_empty, n=2)
+    _dense = dict(_empty, n=12)
+    check("수요0 + 경쟁0 = 최고 기회", _op.score(0, _empty) >= 0.7, _op.score(0, _empty))
+    check("수요0 + 경쟁2 도 기회", _op.score(0, _sparse) >= 0.6, _op.score(0, _sparse))
+    check("수요0 + 경쟁많음 = 0", _op.score(0, _dense) == 0.0)
+    check("빈 판이 수요 큰 빽빽한 판보다 높다",
+          _op.score(0, _sparse) > _op.score(9, dict(_dense, ontopic=6)))
+
     # 세션 만료 사전 경고: 죽고 나서가 아니라 미리 알아야 발행이 안 멈춘다
     import metrics as _m
     check("만료 사전경고 기준", _m.SESSION_WARN_DAYS >= 7, _m.SESSION_WARN_DAYS)
@@ -205,6 +216,9 @@ def t_parser():
     import opportunity as _opp
     _joined = _opp.diagnose("카페입간판", [{"title": "카페 입간판 추천, 철제입간판"}] * 3)
     check("붙여쓴 키워드도 온토픽으로 잡힌다", _joined["ontopic"] == 3, _joined["ontopic"])
+    # 대소문자도 무시해야 한다 — 'vvip피켓' vs 'VVIP피켓 …' 이 안 맞아 동음이의어로 오탐됐다
+    _case = _opp.diagnose("vvip피켓", [{"title": "VVIP피켓 VIP피켓 엑셀방송용 시그니처피켓"}] * 2)
+    check("대소문자 달라도 온토픽", _case["ontopic"] == 2, _case["ontopic"])
     # 온토픽 0 은 빈틈이 아니라 동음이의어일 수 있다 → 표시하고 점수를 깎는다
     _homo = _opp.diagnose("바사인", [{"title": f"창세기 성경공부 {i}장"} for i in range(6)])
     check("온토픽 0 이면 동음이의어 경보", _homo["homonym_risk"] is True)
