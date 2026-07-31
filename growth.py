@@ -331,17 +331,50 @@ def _winnability(kw: str, latest: dict) -> float:
     return 0.35 * fmt
 
 
+def _opp_row(kw: str) -> dict | None:
+    """opportunity 스캔에 저장된 그 키워드의 진단 행."""
+    try:
+        import opportunity  # noqa: PLC0415
+        for r in _load(opportunity.OUT, []):
+            if r.get("keyword") == kw:
+                return r
+    except Exception:
+        pass
+    return None
+
+
+def _sparse_field(kw: str) -> bool:
+    """모바일 블로그탭 경쟁이 비어 있는 판인가(opportunity 스캔 결과 기준)."""
+    r = _opp_row(kw)
+    if not r:
+        return False
+    import opportunity  # noqa: PLC0415
+    return r.get("n", 99) <= opportunity.SPARSE_N and not r.get("homonym_risk")
+
+
+def _sparse_score(kw: str) -> float:
+    """경쟁이 비어 있는 판의 기회 점수(없으면 0 = 기여 없음)."""
+    r = _opp_row(kw)
+    return float(r.get("score", 0.0)) if r and _sparse_field(kw) else 0.0
+
+
 def _zero_demand_penalty(kw: str, dmap: dict) -> float:
-    """검색 수요가 **실측 0**이면 총점을 크게 깎는다.
+    """검색 수요가 **실측 0**이면 총점을 깎는다 — 단 경쟁이 비어 있으면 깎지 않는다.
 
     2026-07-28 실측: b19(LED 폭죽 트레이)·b21(클럽 조형물) 같은 수요 0 초안이 큐 #4·#5 였다.
-    demand 점수는 0인데 세그먼트·SEO·탐색 점수가 자리를 채워준 탓이다.
-    수요 0 = 검색으로는 방문자가 오지 않는다 = 발행 슬롯 낭비.
-    단 **미측정(None)은 깎지 않는다** — 아직 기회일 수 있으므로 측정 뒤에 판단한다.
-    a(BJ) 글은 대부분 수요 0이지만 스케줄러의 BJ 쿼터가 별도로 하루 2편을 보장한다.
+    수요 0 + 경쟁 빽빽 = 발행 슬롯 낭비가 맞다.
+
+    ★그런데 2026-07-30 유입 실측에서 정반대 사례가 나왔다. **실제 유입 6건 중 5건이
+    자동완성 수요 0~4 인 BJ 키워드**였다(vip피켓·led 응원 피켓·비제이 전광판 구매).
+    그 판은 모바일 블로그탭 경쟁이 0~3건으로 비어 있어서, 검색량이 적어도 그 소량이
+    전부 우리에게 왔다. 반대로 수요 9였던 '카페입간판'은 유입 0.
+    → **수요가 아니라 '수요 0 × 경쟁 빽빽'이 나쁜 조합**이다. 경쟁이 비면 면제한다.
+    (이 페널티가 a 세그먼트를 큐 바닥에 묶어두고 있었다 — BJ 쿼터로 겨우 발행되던 것.)
     """
     n = dmap.get(kw)
-    return 0.3 if isinstance(n, (int, float)) and n == 0 else 1.0
+    if not (isinstance(n, (int, float)) and n == 0):
+        return 1.0                      # 수요 있음 / 미측정 → 깎지 않음
+    return 1.0 if _sparse_field(kw) else 0.3
 
 
 def _cannibal_penalty(kw: str, published_kws: set) -> float:
@@ -398,6 +431,9 @@ def rank_queue() -> list[dict]:
                     * _research_penalty(kw, p))
         if _opportunity_allowed(kw, dmap):
             demand_s = max(demand_s, _research_opportunity(kw, p))
+        # ★모바일 경쟁이 비어 있는 판은 자동완성 수요와 무관하게 기회다(2026-07-30 실측).
+        # opportunity.score 가 이미 그 판정을 담고 있으므로 하한으로 쓴다.
+        demand_s = max(demand_s, _sparse_score(kw))
         explore = 1 - pub_per_seg[seg] / max_pub      # 적게 발행된 세그먼트 ↑
         diversity = rem_per_seg[seg] / max_rem         # 잔량 많은 세그먼트 ↑
         base = (w["demand"] * demand_s + w["seg"] * seg_s + w["seo"] * seo_s
