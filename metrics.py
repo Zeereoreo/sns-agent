@@ -326,16 +326,22 @@ def _external_indexed(page, blog: str) -> int | None:
 
 
 def _recent_titles(n: int = 3) -> list[str]:
-    """최근 발행 성공 글의 제목(중복 제거). 색인 시험용 표본."""
+    """색인 시험용 표본 제목 — **오래된 글 위주 + 최신 1편**(중복 제거).
+
+    최신 3편만 재던 것을 2026-07-31 에 고쳤다. 새 글은 건강한 블로그에서도 색인까지
+    며칠 걸리므로, 최신만 보면 '아직 안 됨'을 '색인에서 빠짐'으로 오독한다.
+    그 오독이 편집 게이트·발행 상한까지 좌우하므로 표본을 양끝으로 벌린다.
+    (같은 날 실측: made-us2 는 7/22 글까지 전부 검색에 없다 — 넓은 표본이라야 보인다.)
+    """
     state = _load(ROOT / "data" / "publish_state.json", {})
-    out = []
-    for e in reversed(state.get("log", [])):
+    titles: list[str] = []
+    for e in state.get("log", []):          # log 는 오래된 것부터
         if e.get("ok") and not e.get("dry") and e.get("title"):
-            if e["title"] not in out:
-                out.append(e["title"])
-        if len(out) >= n:
-            break
-    return out
+            if e["title"] not in titles:
+                titles.append(e["title"])
+    if len(titles) <= n:
+        return titles
+    return titles[:n - 1] + titles[-1:]     # 오래된 n-1 편 + 최신 1편
 
 
 def _warn_not_indexed(today: str, sampled: int) -> None:

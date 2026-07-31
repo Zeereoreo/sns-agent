@@ -316,6 +316,48 @@ def t_metrics():
     check("키워드 비어있지 않음", bool(kw.strip()), kw)
 
 
+def t_index_gate():
+    section("색인 표본·색인 대기 감속")
+    import json as _json
+    import metrics
+    import scheduler
+    import config
+
+    # 표본은 '최신만'이 아니라 오래된 글까지 포함해야 한다(새 글은 원래 늦게 색인된다).
+    log = [{"ok": True, "dry": False, "title": f"t{i}"} for i in range(1, 8)]
+    state = metrics.ROOT / "data" / "publish_state.json"
+    orig = state.read_text(encoding="utf-8") if state.exists() else None
+    try:
+        state.write_text(_json.dumps({"published": [], "log": log}, ensure_ascii=False),
+                         encoding="utf-8")
+        s = metrics._recent_titles(3)
+        check("표본에 가장 오래된 글 포함", "t1" in s, s)
+        check("표본에 최신 글 포함", "t7" in s, s)
+        check("표본 개수 3", len(s) == 3, s)
+    finally:
+        if orig is not None:
+            state.write_text(orig, encoding="utf-8")
+
+    # 색인 0 이면 하루 1편, 색인이 살아 있으면 설정 상한 그대로.
+    mp = scheduler.ROOT / "data" / "metrics.json"
+    m_orig = mp.read_text(encoding="utf-8")
+    try:
+        m = _json.loads(m_orig)
+        m["index_status"] = {"sampled": 3, "found": 0}
+        mp.write_text(_json.dumps(m, ensure_ascii=False), encoding="utf-8")
+        check("색인 0 → 하루 1편", scheduler._daily_cap() == 1)
+        m["index_status"] = {"sampled": 3, "found": 2}
+        mp.write_text(_json.dumps(m, ensure_ascii=False), encoding="utf-8")
+        check("색인 살아있으면 설정 상한",
+              scheduler._daily_cap() == config.MAX_POSTS_PER_DAY)
+        m["index_status"] = {}
+        mp.write_text(_json.dumps(m, ensure_ascii=False), encoding="utf-8")
+        check("근거 없으면 감속 안 함",
+              scheduler._daily_cap() == config.MAX_POSTS_PER_DAY)
+    finally:
+        mp.write_text(m_orig, encoding="utf-8")
+
+
 def t_research():
     section("research 텍스트 정규화")
     import research
@@ -389,8 +431,8 @@ def t_scheduler_alert():
 
 
 def main():
-    for t in (t_parser, t_seo, t_images, t_metrics, t_research, t_growth, t_dashboard,
-              t_scheduler_alert):
+    for t in (t_parser, t_seo, t_images, t_metrics, t_index_gate, t_research, t_growth,
+              t_dashboard, t_scheduler_alert):
         try:
             t()
         except Exception:
