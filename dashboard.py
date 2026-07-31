@@ -1043,7 +1043,7 @@ def run_diagnostics(d) -> list[dict]:
             zeros += 1
         if zeros >= 2:
             add("검색 유입", "bad", f"**{zeros}일 연속 0명** (최근 7일: {trend})",
-                "발행글 편집 금지 상태. 새 글 발행만 이어가며 회복 관찰")
+                "발행글은 건드리지 말 것(경고만 걸려 있고 차단은 아님). 새 글만 올리며 회복 관찰")
         elif zeros == 1:
             add("검색 유입", "warn", f"어제 0명 (최근 7일: {trend})")
         else:
@@ -1065,6 +1065,19 @@ def run_diagnostics(d) -> list[dict]:
     else:
         add("네이버 색인", "ok",
             f"표본 {idx['sampled']}편 전부 색인됨 ({idx.get('checked','')})")
+
+    # 1-1b) 네이버 밖(구글·빙) 색인 — 네이버가 막혀도 이쪽은 별개로 열릴 수 있다.
+    # 다만 네이버 블로그는 외부 크롤러에게 m.blog URL 만 열려 있고, 신생 블로그는
+    # 외부 링크가 하나도 없으면 발견 자체가 안 된다 → 백링크가 유일한 실질 레버.
+    ext = _load_json(ROOT / "data" / "metrics.json", {}).get("external_index")
+    if not ext:
+        add("외부 색인", "warn", "점검 데이터 없음(다음 수집 시 생성)")
+    elif not ext.get("count"):
+        add("외부 색인", "warn",
+            f"네이버 밖(빙·구글 계열)에도 0편 ({ext.get('checked','')})",
+            "외부는 링크로 발견된다 — 홈페이지·인스타 프로필·유튜브 설명 등에 블로그 주소를 걸어두세요")
+    else:
+        add("외부 색인", "ok", f"네이버 밖에 {ext['count']}편 색인됨 ({ext.get('checked','')})")
 
     # 1-2) 라이브 전수 대조(주 1회) — 발행된 글이 아직도 계획대로인지
     la = _load_json(ROOT / "data" / "live_audit.json", {})
