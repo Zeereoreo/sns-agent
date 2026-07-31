@@ -218,9 +218,18 @@ def pick_images(draft_path, n: int, advance: bool = True) -> tuple[list[Path], l
         groups = _group_pool(pool)
         # 한 그룹으로 필요한 장수를 채울 수 있으면 그 그룹만 쓴다(한 글 = 한 제품).
         # 채울 만한 그룹이 없을 때만 여러 그룹을 이어 붙인다.
-        groups = [g for g in groups if len(g) >= need] or groups
+        enough = [g for g in groups if len(g) >= need]
         start = _load_rot()
-        gi = start
+        if enough:
+            groups, gi = enough, start
+        else:
+            # 한 묶음으로 다 못 채운다(슬롯 20장 규격에서는 흔하다 — c 는 최대 묶음이 8장).
+            # 이때 **큰 묶음부터** 쓴다. 앞쪽(본문) 슬롯이 한 제품으로 채워지고 남는 뒤쪽
+            # (= 초안 끝 '실제 제작 사례' 갤러리)만 다른 제품이 된다(2026-07-31 사용자 결정).
+            # 정렬하지 않으면 1장짜리 단품이 본문 첫 슬롯에 와서 본문부터 제품이 뒤섞인다.
+            groups = sorted(groups, key=len, reverse=True)
+            big = [g for g in groups if len(g) >= GROUP_MAX] or groups[:1]
+            gi = start % len(big)          # 글마다 다른 제품이 대표가 되도록 큰 묶음 안에서만 회전
         used_groups = 0
         while len(picks) < n and used_groups < len(groups):
             for p in groups[gi % len(groups)]:
