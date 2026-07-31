@@ -185,31 +185,6 @@ def run(dry_run: bool = True) -> None:
             pass
 
 
-def _daily_cap() -> int:
-    """오늘의 발행 상한. **색인에서 빠져 있는 동안은 하루 1편으로 줄인다.**
-
-    2026-07-31 실측: made-us2 는 통합검색·블로그탭·블로그 서비스 검색(section.blog)
-    어디에도 없다. 7/22 옛 글부터 7/31 새 글까지 30편 전부, 블로그 이름으로도 안 나온다
-    (같은 회사 원본 블로그 made-us 는 정상 노출). 글은 전체공개·검색허용·robots index 다.
-    즉 '아직 수집 전'이 아니라 **블로그째 검색에서 빠진 상태**다.
-
-    그 상태에서 하루 3편은 두 가지로 손해다.
-      ① 남은 초안(25편)을 보이지 않는 블로그에 태운다 — 좋은 카드를 빈 방에 내는 셈.
-      ② 개설 2주짜리 블로그의 하루 3편 자동 발행은 그 자체가 스팸 신호로 읽힌다.
-    발행을 멈추지는 않는다(활동 자체는 회복에 필요). 속도만 줄이고, 색인이 돌아오면
-    자동으로 원래 상한으로 복귀한다. 근거 자료가 없으면 손대지 않는다.
-    """
-    cap = config.MAX_POSTS_PER_DAY
-    try:
-        m = json.loads((ROOT / "data" / "metrics.json").read_text(encoding="utf-8"))
-        idx = m.get("index_status") or {}
-    except Exception:
-        return cap                      # 판단 근거 없으면 원래 상한
-    if idx.get("sampled") and idx.get("found", 0) == 0:
-        return min(cap, 1)
-    return cap
-
-
 def _run(dry_run: bool = True) -> None:
     # 로그 구분선은 여기서 찍는다(배치 echo 로 찍으면 cp949 라 UTF-8 로그와 섞임).
     print(f"\n===== {datetime.now():%Y-%m-%d %H:%M:%S} =====")
@@ -218,12 +193,8 @@ def _run(dry_run: bool = True) -> None:
     published = set(s["published"])
     today_ok = sum(1 for e in s["log"] if e.get("date") == today and e.get("ok"))
 
-    cap = _daily_cap()
-    if cap < config.MAX_POSTS_PER_DAY:
-        print(f"[색인 대기] 검색에서 빠진 상태 — 오늘 상한을 {cap}편으로 줄입니다"
-              f"(설정 {config.MAX_POSTS_PER_DAY}편).")
-    if not dry_run and today_ok >= cap:
-        print(f"오늘 발행 상한({cap}) 도달. 종료.")
+    if not dry_run and today_ok >= config.MAX_POSTS_PER_DAY:
+        print(f"오늘 발행 상한({config.MAX_POSTS_PER_DAY}) 도달. 종료.")
         return
 
     # 특정 초안이 자기 문제로 계속 실패하면 큐가 그 자리에서 막힌다(무한 재시도).
@@ -257,7 +228,7 @@ def _run(dry_run: bool = True) -> None:
     if not nxt.name.startswith("a"):
         today_a = sum(1 for e in s["log"] if e.get("date") == today and e.get("ok")
                       and str(e.get("draft", "")).startswith("a"))
-        slots_left = max(1, cap - today_ok)
+        slots_left = max(1, config.MAX_POSTS_PER_DAY - today_ok)
         need_a = max(0, 2 - today_a)
         if need_a >= slots_left:
             try:
@@ -500,9 +471,7 @@ def status() -> None:
     pub = set(s["published"])
     print(f"전체 초안: {len(alld)}  |  발행됨: {len(pub)}  |  남음: {len(alld) - len(pub)}")
     today = str(date.today())
-    cap = _daily_cap()
-    note = f"  (색인 대기로 {config.MAX_POSTS_PER_DAY}→{cap} 감속)" if cap < config.MAX_POSTS_PER_DAY else ""
-    print(f"오늘 발행: {sum(1 for e in s['log'] if e.get('date') == today and e.get('ok'))} / {cap}{note}")
+    print(f"오늘 발행: {sum(1 for e in s['log'] if e.get('date') == today and e.get('ok'))} / {config.MAX_POSTS_PER_DAY}")
     # 다음 대상 = 실제 발행에 쓰는 성장엔진 선택(폴백: 인터리브)
     nxt = None
     try:

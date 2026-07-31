@@ -62,8 +62,17 @@ TITLE_HEAD = 30      # 이 앞부분에 대표 키워드가 있어야 한다(구
 TITLE_MAX = 100      # 네이버 제목 상한
 TITLE_GOOD = 45      # 이보다 짧으면 키워드 커버리지가 아깝다(원본 중앙값 98)
 TAG_MAX = 20         # 경쟁 상위 글 실측 상한(enrich_posts.TAG_MAX 와 같은 근거)
+# 분량·이미지 규격(2026-07-31 수정 — 근거: 원본 made-us 90편 실측, 라운드 10)
+#   색인이 정상이고 구글 1위인 원본은 **본문 3,143~3,933자 · 이미지 20~26장**이다.
+#   우리 초안 중앙값은 1,533자 · 8장 — 원본의 43% / 40% 수준인데도 옛 기준
+#   (BODY_GOOD 1500 · 이미지 3장 만점)에서는 전부 만점이 나왔다. 게이트가 얇은 글을
+#   'A100' 이라고 말해 온 것이다(라운드 9·10 의 '게이트 자기교정'과 같은 종류의 결함).
+#   **합격선(BODY_MIN·이미지 3장)은 올리지 않는다.** 기존 초안을 무더기 미달로 만들면
+#   글자수를 채우려 지어내는 압력이 된다(CONV_SPEC_GOOD 6→4 교훈). 만점 기준만 실측에
+#   맞춰 점수가 정직해지게 한다. 점수를 올리는 정직한 방법은 사례·실물 사진을 더 넣는 것.
 BODY_MIN = 1000
-BODY_GOOD = 1500
+BODY_GOOD = 3000     # 원본 실측 범위(3,143~3,933)의 하한
+IMG_GOOD = 20        # 원본 실측 범위(20~26장)의 하한. 사진 풀 519장(a335·b28·c156)으로 가능
 
 
 def _read(p: Path) -> str:
@@ -160,7 +169,8 @@ def score_draft(path: Path) -> dict:
     add("conversion", n_spec >= CONV_SPEC_GOOD and not n_dodge,
         f"구체 수치 {n_spec}개" + (f" / 회피답변 {n_dodge}개" if n_dodge else ""),
         partial=conv)
-    add("images", n_img >= 3, f"이미지 슬롯 {n_img}개", partial=min(1.0, n_img / 3))
+    add("images", n_img >= 3, f"이미지 슬롯 {n_img}개 (원본 규격 {IMG_GOOD}장)",
+        partial=min(1.0, n_img / IMG_GOOD))
     # 캡션은 첫 슬롯(대표=인포그래픽)만 초안 ALT 로 쓴다. 나머지 슬롯은 발행 시
     # 실제 삽입된 사진 파일명에서 만들어지므로(images.photo_caption) 여기서 미달로 보지 않는다.
     n_capable = min(n_img, n_cap + max(0, n_img - 1))
