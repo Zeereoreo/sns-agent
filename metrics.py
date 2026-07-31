@@ -399,9 +399,15 @@ def collect(force_ranks: bool = False) -> dict:
             data.setdefault("visitors", {})[today] = vc
             print(f"[방문자] 오늘 {vc['today']} / 전체 {vc['total']}")
 
-        if need_ranks and kw_map:
+        # 발행글 대표 키워드 + 운영자가 대시보드에서 추가한 키워드(초안이 없어도 추적한다).
+        targets = list(kw_map.items())
+        for kw in config.load_keywords():
+            if kw not in kw_map.values():
+                targets.append((f"(직접 추가) {kw}", kw))
+
+        if need_ranks and targets:
             ranks, failures = {}, 0
-            for name, kw in kw_map.items():
+            for name, kw in targets:
                 r, n_results = _rank_of(page, kw, blog)
                 if r is None and n_results == 0:
                     # SERP가 비어있음 = 스크래핑 실패/차단. '이탈'로 기록하지 않고 건너뜀.

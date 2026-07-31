@@ -358,6 +358,23 @@ def _sparse_score(kw: str) -> float:
     return float(r.get("score", 0.0)) if r and _sparse_field(kw) else 0.0
 
 
+def _user_priority(kw: str) -> float:
+    """운영자가 대시보드 '키워드' 탭에 직접 넣은 키워드면 가산한다.
+
+    엔진이 쓰는 수요·경쟁 신호는 전부 프록시다. 현장을 아는 사람이 "이건 된다"고
+    집어넣은 키워드는 그 프록시들보다 나은 정보일 때가 많다(실측 유입어
+    '휴대용led응원피켓'을 자동완성은 0으로 봤다). 그래서 **배제가 아니라 가산**으로 둔다.
+    """
+    if not kw:
+        return 1.0
+    try:
+        import config  # noqa: PLC0415
+        picks = [k.replace(" ", "").lower() for k in config.load_keywords()]
+    except Exception:
+        return 1.0
+    return 1.25 if kw.replace(" ", "").lower() in picks else 1.0
+
+
 def _zero_demand_penalty(kw: str, dmap: dict) -> float:
     """검색 수요가 **실측 0**이면 총점을 깎는다 — 단 경쟁이 비어 있으면 깎지 않는다.
 
@@ -441,13 +458,15 @@ def rank_queue() -> list[dict]:
         fit = _fit_multiplier(kw)                      # 손님 우선순위(BJ/스트리머 우선)
         cann = _cannibal_penalty(kw, published_kws)    # 같은 키워드 중복 발행 방지
         zero = _zero_demand_penalty(kw, dmap)          # 실측 수요 0 = 검색 유입 없음
-        total = base * fit * cann * zero
+        pick = _user_priority(kw)                      # 운영자가 직접 넣은 타깃 키워드
+        total = base * fit * cann * zero * pick
         rows.append({
             "name": p.name, "seg": seg, "keyword": kw,
             "score": round(total, 4),
             "breakdown": {"demand": round(demand_s, 2), "seg": round(seg_s, 2),
                           "seo": round(seo_s, 2), "explore": round(explore, 2),
-                          "diversity": round(diversity, 2), "fit": round(fit, 2)},
+                          "diversity": round(diversity, 2), "fit": round(fit, 2),
+                          "pick": round(pick, 2)},
         })
     rows.sort(key=lambda r: r["score"], reverse=True)
     # 큐 안에서도 같은 키워드가 겹치면 1등만 남기고 나머지는 할인한다.

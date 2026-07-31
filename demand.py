@@ -65,6 +65,14 @@ def audit() -> None:
             n, sug = keyword_demand(page, kw)
             rows.append((n, f.name, kw, sug))
             cache[kw] = n
+        # 대시보드에서 운영자가 직접 넣은 키워드도 같이 잰다(초안이 아직 없어도 된다).
+        import config  # noqa: PLC0415
+        for kw in config.load_keywords():
+            if kw in cache:
+                continue
+            n, sug = keyword_demand(page, kw)
+            rows.append((n, "(직접 추가)", kw, sug))
+            cache[kw] = n
         ctx.close()
 
     CACHE.parent.mkdir(exist_ok=True)

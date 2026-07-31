@@ -61,6 +61,37 @@ def save_emphasis(points: list[str]) -> None:
     os.replace(tmp, EMPHASIS_FILE)
 
 
+# ----- 운영자가 직접 넣는 타깃 키워드 (대시보드 '키워드' 탭) -----
+# 자동완성 수요 프록시는 롱테일을 못 잡는다(실측 유입어 '휴대용led응원피켓'을 0으로 봤다).
+# 사람이 아는 키워드를 직접 넣을 통로가 필요하다. 여기 넣은 키워드는
+# 수요 측정·순위 추적·경쟁 스캔 대상에 들어가고, 성장엔진이 우선 타깃으로 가산한다.
+KEYWORDS_FILE = DATA_DIR / "keywords_user.json"
+KEYWORDS_MAX = 30
+
+
+def load_keywords() -> list[str]:
+    """운영자가 추가한 타깃 키워드. 없으면 빈 리스트."""
+    try:
+        d = json.loads(KEYWORDS_FILE.read_text(encoding="utf-8"))
+        return [s.strip() for s in d.get("keywords", []) if s and s.strip()][:KEYWORDS_MAX]
+    except Exception:
+        return []
+
+
+def save_keywords(keywords: list[str]) -> None:
+    """중복·공백을 정리해 저장(입력 순서 유지)."""
+    DATA_DIR.mkdir(exist_ok=True)
+    clean: list[str] = []
+    for s in keywords:
+        s = " ".join((s or "").split())
+        if s and s not in clean:
+            clean.append(s)
+    tmp = KEYWORDS_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"keywords": clean[:KEYWORDS_MAX]}, ensure_ascii=False, indent=1),
+                   encoding="utf-8")
+    os.replace(tmp, KEYWORDS_FILE)
+
+
 def require_api_key() -> str:
     """API 키가 없으면 친절한 오류를 낸다."""
     if not ANTHROPIC_API_KEY:

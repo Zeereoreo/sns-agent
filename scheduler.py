@@ -490,7 +490,7 @@ def _scan_opportunities_weekly() -> None:
         return
     import opportunity  # noqa: PLC0415
     print("[기회] 주간 스캔 시작(제품 시드 기준)")
-    opportunity.scan(opportunity.SEEDS, max_candidates=12)
+    opportunity.scan(opportunity.seeds(), max_candidates=12)
     OPP_STAMP.write_text(date.today().isoformat(), encoding="utf-8")
 
 

@@ -358,6 +358,39 @@ def t_index_gate():
         mp.write_text(m_orig, encoding="utf-8")
 
 
+def t_user_keywords():
+    section("운영자 타깃 키워드(대시보드 추가)")
+    import config
+    import growth
+    import opportunity
+
+    before = config.load_keywords()
+    try:
+        config.save_keywords([" 휴대용led응원피켓 ", "vip피켓", "vip피켓", "", "비제이 전광판 구매"])
+        got = config.load_keywords()
+        check("공백 정리·중복 제거", got == ["휴대용led응원피켓", "vip피켓", "비제이 전광판 구매"], got)
+        config.save_keywords([f"키워드{i}" for i in range(config.KEYWORDS_MAX + 5)])
+        check("상한 적용", len(config.load_keywords()) == config.KEYWORDS_MAX)
+
+        config.save_keywords(["vip피켓"])
+        check("지정 키워드는 가산", growth._user_priority("VIP 피켓") == 1.25)
+        check("띄어쓰기 달라도 같은 키워드", growth._user_priority("vip 피켓") == 1.25)
+        check("지정 안 한 키워드는 중립", growth._user_priority("네온사인") == 1.0)
+        check("빈 키워드는 중립", growth._user_priority("") == 1.0)
+        check("경쟁 스캔 시드에 포함", "vip피켓" in opportunity.seeds())
+        check("고정 시드도 유지", "네온사인" in opportunity.seeds())
+
+        import dashboard
+        rows = dashboard._keyword_rows(set())
+        picked = [r for r in rows if r["picked"]]
+        check("대시보드에 지정 키워드 노출", len(picked) >= 1, picked[:1])
+        check("지정 키워드가 맨 위", rows[0]["picked"] is True)
+        norm = [r["kw"].replace(" ", "").lower() for r in rows]
+        check("같은 키워드 중복 행 없음", len(norm) == len(set(norm)))
+    finally:
+        config.save_keywords(before)
+
+
 def t_research():
     section("research 텍스트 정규화")
     import research
@@ -431,8 +464,8 @@ def t_scheduler_alert():
 
 
 def main():
-    for t in (t_parser, t_seo, t_images, t_metrics, t_index_gate, t_research, t_growth,
-              t_dashboard, t_scheduler_alert):
+    for t in (t_parser, t_seo, t_images, t_metrics, t_index_gate, t_user_keywords,
+              t_research, t_growth, t_dashboard, t_scheduler_alert):
         try:
             t()
         except Exception:

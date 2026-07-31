@@ -49,6 +49,21 @@ SEEDS = ["LED 간판", "네온사인", "아크릴 간판", "아크릴 메뉴판"
          "엑셀방송 피켓", "아프리카TV 피켓", "BJ 피켓", "개인방송 피켓",
          "인터넷방송 피켓", "큰손 피켓", "시그니처 피켓", "LED 무선피켓"]
 
+
+def seeds() -> list[str]:
+    """스캔 시드 = 고정 시드 + 운영자가 대시보드에서 추가한 키워드.
+
+    사람이 아는 키워드(현장 용어·롱테일)는 자동완성 프록시로 못 찾는다.
+    추가한 키워드는 경쟁 스캔에 바로 들어가 '비어 있는 판'인지 판정을 받는다.
+    """
+    import config  # noqa: PLC0415
+    out = list(SEEDS)
+    for kw in config.load_keywords():
+        if kw not in out:
+            out.append(kw)
+    return out
+
+
 # 발행 글 태그에 넣을 방송 플랫폼·업계 용어. 경쟁 상위 글 태그 실측 빈도(2026-07-29,
 # research.py 로 BJ/방송 키워드 7개 집계): 아프리카TV 13 · 엑셀방송 9 · 숲티비 6 ·
 # SOOP 5 · 팬더TV 4 · 플렉스TV 4 · 띵라이브 4 · 큰손 2. 우리 17편 중 1편만 갖고 있었다.
@@ -375,8 +390,8 @@ def main() -> None:
             return
         _report(json.loads(OUT.read_text(encoding="utf-8")))
         return
-    seeds = [s.strip() for s in a.seeds.split(",")] if a.seeds else SEEDS
-    scan(seeds, a.max)
+    use = [s.strip() for s in a.seeds.split(",")] if a.seeds else seeds()
+    scan(use, a.max)
 
 
 if __name__ == "__main__":

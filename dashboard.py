@@ -215,6 +215,70 @@ def _metrics_view() -> dict:
     }
 
 
+def _keyword_rows(published: set) -> list[dict]:
+    """키워드 한 줄 = 우리가 그 말에 대해 아는 전부(수요·순위·경쟁·담당 글).
+
+    지금까지 키워드 정보가 세 파일(demand_cache·metrics.ranks·opportunities)에
+    흩어져 있어 '이 키워드 지금 어떤 상태냐'를 한눈에 볼 수가 없었다.
+    운영자가 직접 넣은 키워드는 담당 글이 없어도 목록에 남긴다(= 써야 할 글감).
+    """
+    demand = _load_json(ROOT / "data" / "demand_cache.json", {})
+    opp = {r.get("keyword"): r
+           for r in _load_json(ROOT / "data" / "opportunities.json", []) if r.get("keyword")}
+    mv = _metrics_view()
+    rank = {r["kw"]: r for r in mv["kw_rows"]}
+    picks = config.load_keywords()
+    pick_norm = {k.replace(" ", "").lower() for k in picks}
+
+    rows, seen = [], set()
+
+    def add(kw, source, draft=""):
+        # 띄어쓰기·대소문자만 다른 같은 키워드는 한 줄로(‘VIP 피켓’과 ‘vip피켓’).
+        key = (kw or "").replace(" ", "").lower()
+        if not key or key in seen:
+            return
+        seen.add(key)
+        o = opp.get(kw) or {}
+        r = rank.get(kw) or {}
+        rows.append({
+            "kw": kw, "source": source, "draft": draft,
+            "demand": demand.get(kw),
+            "rank": r.get("rank"), "delta": r.get("delta"),
+            "comp_n": o.get("n"), "ontopic": o.get("ontopic"), "opp": o.get("score"),
+            "picked": kw.replace(" ", "").lower() in pick_norm,
+        })
+
+    for kw in picks:                                    # 운영자 지정이 맨 위
+        drafts_hit = [p.name for p in scheduler._ordered_drafts()
+                      if _draft_kw(p) and _draft_kw(p).replace(" ", "").lower()
+                      == kw.replace(" ", "").lower()]
+        add(kw, "직접 추가", drafts_hit[0] if drafts_hit else "")
+    for p in scheduler._ordered_drafts():
+        add(_draft_kw(p), "발행됨" if p.name in published else "초안", p.name)
+
+    def order(r):
+        return (not r["picked"],                        # 지정 키워드 먼저
+                r["rank"] if isinstance(r["rank"], int) else 999,
+                -(r["demand"] if isinstance(r["demand"], int) else -1))
+    rows.sort(key=order)
+    return rows
+
+
+_KW_CACHE: dict[str, str] = {}
+
+
+def _draft_kw(p: Path) -> str:
+    """초안의 대표 키워드(파일 수정시각 기준 캐시)."""
+    key = f"{p.name}:{p.stat().st_mtime_ns if p.exists() else 0}"
+    if key not in _KW_CACHE:
+        try:
+            import metrics as metmod  # noqa: PLC0415
+            _KW_CACHE[key] = metmod.primary_keyword(p)
+        except Exception:
+            _KW_CACHE[key] = ""
+    return _KW_CACHE[key]
+
+
 def collect() -> dict:
     state = scheduler._load_state()
     drafts = scheduler._ordered_drafts()
@@ -286,6 +350,9 @@ def collect() -> dict:
         "images": {"info": len(infographics), "inbox": len(inbox), "pool": len(pool)},
         "shots": [s.name for s in shots],
         "tasks": task_info(),
+        "keywords": _keyword_rows(published),
+        "kw_picks": config.load_keywords(),
+        "external_index": _load_json(ROOT / "data" / "metrics.json", {}).get("external_index"),
     }
 
 
@@ -424,7 +491,8 @@ def _rank_badge(rank, delta) -> str:
     return f"<span class='badge {cls}'>{rank}위</span>{arrow}"
 
 
-NAV = [("/", "개요"), ("/analytics", "성과"), ("/growth", "성장엔진"), ("/posts", "발행"),
+NAV = [("/", "개요"), ("/analytics", "성과"), ("/keywords", "키워드"),
+       ("/growth", "성장엔진"), ("/posts", "발행"),
        ("/calendar", "캘린더"), ("/seo", "콘텐츠·SEO"), ("/images", "이미지"),
        ("/settings", "설정"), ("/diag", "진단"), ("/ops", "상태")]
 
@@ -834,6 +902,59 @@ def page_analytics(d) -> str:
                "<form method='POST' action='/refresh-metrics' style='display:inline'>"
                f"<button type='submit'>순위·방문자 새로고침</button></form>{last}</div>")
     return _kpi_cards(d) + dl + act + _metrics_section(d)
+
+
+def page_keywords(d) -> str:
+    e = html.escape
+    rows = d["keywords"]
+    picks = d["kw_picks"]
+    ext = d.get("external_index") or {}
+
+    def cell(v, suffix=""):
+        return f"{v}{suffix}" if isinstance(v, (int, float)) else "<span class='muted'>-</span>"
+
+    trs = []
+    for r in rows:
+        tag = ("<span class='badge ok'>지정</span>" if r["picked"]
+               else f"<span class='badge mut'>{e(r['source'])}</span>")
+        if r["picked"] and not r["draft"]:
+            tag += " <span class='badge warn'>글 없음</span>"
+        comp = ("<span class='muted'>미스캔</span>" if r["comp_n"] is None
+                else f"{r['comp_n']}편 중 온토픽 {r['ontopic']}")
+        trs.append(
+            f"<tr><td><b>{e(r['kw'])}</b><div class='muted'>{e(r['draft'] or '')}</div></td>"
+            f"<td>{tag}</td><td>{cell(r['demand'])}</td>"
+            f"<td>{_rank_badge(r['rank'], r['delta'])}</td>"
+            f"<td>{comp}</td><td>{cell(r['opp'])}</td></tr>")
+
+    ext_line = ("<span class='muted'>아직 측정 없음</span>" if not ext else
+                f"{ext.get('count')}편 색인됨 <span class='muted'>({e(str(ext.get('engine','')))}"
+                f" · {e(str(ext.get('checked','')))})</span>")
+
+    return f"""
+<div class="panel"><div class="ptit">타깃 키워드 추가</div>
+<p class="muted" style="margin:0 0 8px">한 줄에 하나씩. 최대 {config.KEYWORDS_MAX}개.
+여기 넣은 키워드는 ① <b>수요·경쟁 측정</b>(주간 스캔) ② <b>순위 매일 추적</b>
+③ <b>성장엔진이 그 키워드를 노린 초안을 우선 발행</b>합니다.
+자동완성으로는 안 잡히는 현장 용어·롱테일을 넣기에 좋습니다
+(실제 유입어 '휴대용led응원피켓'을 자동완성은 0으로 봤습니다).</p>
+<form method="POST" action="/save-keywords">
+  <textarea name="keywords" rows="7" class="ta"
+    placeholder="휴대용led응원피켓&#10;비제이 전광판 구매&#10;vip피켓">{e(chr(10).join(picks))}</textarea>
+  <div style="margin-top:10px"><button type="submit">저장</button>
+  <span class="muted">저장 즉시 성장엔진 순서에 반영됩니다. 수요·경쟁·순위는 다음 수집 때 채워집니다.</span></div>
+</form>
+</div>
+<div class="dlbar">네이버 밖(빙·구글 계열) 색인: {ext_line}</div>
+<h2>키워드 현황 ({len(rows)}개)</h2>
+<table>
+<tr><th>키워드 / 담당 글</th><th>구분</th><th>수요</th><th>네이버 순위</th>
+    <th>경쟁(상위 SERP)</th><th>기회점수</th></tr>
+{''.join(trs) or "<tr><td colspan=6 class='muted'>아직 없습니다</td></tr>"}
+</table>
+<p class="muted">수요 = 네이버 자동완성 제안 수(0이어도 경쟁이 비면 기회일 수 있음) ·
+경쟁 = 모바일 블로그탭 상위에서 그 키워드를 정조준한 글 수 ·
+기회점수 = 수요 대비 빈틈 크기. 순위는 색인된 뒤에만 의미가 있습니다.</p>"""
 
 
 def page_posts(d) -> str:
@@ -1295,6 +1416,7 @@ def page_post_detail(d, fname: str) -> str:
 PAGES = {
     "/": ("개요", page_overview),
     "/analytics": ("성과", page_analytics),
+    "/keywords": ("키워드", page_keywords),
     "/growth": ("성장엔진", page_growth),
     "/posts": ("발행", page_posts),
     "/calendar": ("캘린더", page_calendar),
@@ -1344,6 +1466,12 @@ def render(d: dict, shot_base: str = "/shot/", page: str = "/", query: dict | No
                     "— 다음 발행 글부터 우선 사용됩니다.</div>") + body
         elif query.get("err"):
             body = "<div class='alert'>업로드 실패 — 이미지 파일인지 확인하세요.</div>" + body
+    if page == "/keywords" and query:
+        if query.get("ok"):
+            body = (f"<div class='okbar'>✅ 타깃 키워드 {html.escape(query['ok'])}개를 저장했습니다 "
+                    "— 성장엔진 순서에 즉시, 수요·경쟁·순위는 다음 수집 때 반영됩니다.</div>") + body
+        elif query.get("err"):
+            body = "<div class='alert'>저장 실패</div>" + body
     if page == "/settings" and query:
         if query.get("ok"):
             body = "<div class='okbar'>✅ 강조 포인트를 저장했습니다 — 다음 발행 글부터 반영됩니다.</div>" + body
@@ -1427,6 +1555,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/save-emphasis":
             self._handle_save_emphasis()
             return
+        if self.path == "/save-keywords":
+            self._handle_save_keywords()
+            return
         if self.path == "/refresh-metrics":
             if not _refresh["running"]:
                 _refresh["running"] = True
@@ -1455,6 +1586,18 @@ class Handler(BaseHTTPRequestHandler):
             self._redirect("/settings?ok=1")
         except Exception:
             self._redirect("/settings?err=1")
+
+    def _handle_save_keywords(self):
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        body = self.rfile.read(length) if 0 < length < 100_000 else b""
+        form = {k: v[0] for k, v in parse_qs(body.decode("utf-8", "replace")).items()}
+        kws = [ln.strip() for ln in form.get("keywords", "").splitlines() if ln.strip()]
+        try:
+            config.save_keywords(kws)
+            _cache["data"] = None
+            self._redirect(f"/keywords?ok={len(config.load_keywords())}")
+        except Exception:
+            self._redirect("/keywords?err=1")
 
     def _handle_upload(self):
         ctype = self.headers.get("Content-Type", "")
