@@ -380,6 +380,20 @@ def t_user_keywords():
         check("경쟁 스캔 시드에 포함", "vip피켓" in opportunity.seeds())
         check("고정 시드도 유지", "네온사인" in opportunity.seeds())
 
+        # 실측 유입어(metrics.inflow_queries)는 프록시보다 위 — 하한으로 들어간다.
+        import json as _json
+        mp = growth.ROOT / "data" / "metrics.json"
+        m_orig = mp.read_text(encoding="utf-8")
+        try:
+            m = _json.loads(m_orig)
+            m["inflow_queries"] = {"2026-07-27": [{"q": "휴대용led응원피켓", "ratio": 0.2}]}
+            mp.write_text(_json.dumps(m, ensure_ascii=False), encoding="utf-8")
+            check("실측 유입어는 0.9 하한", growth._proven_inflow_score("휴대용 LED 응원피켓") == 0.9)
+            check("유입 없던 키워드는 0", growth._proven_inflow_score("네온사인") == 0.0)
+            check("빈 키워드는 0", growth._proven_inflow_score("") == 0.0)
+        finally:
+            mp.write_text(m_orig, encoding="utf-8")
+
         import dashboard
         rows = dashboard._keyword_rows(set())
         picked = [r for r in rows if r["picked"]]

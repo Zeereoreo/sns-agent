@@ -358,6 +358,28 @@ def _sparse_score(kw: str) -> float:
     return float(r.get("score", 0.0)) if r and _sparse_field(kw) else 0.0
 
 
+def _proven_inflow_score(kw: str) -> float:
+    """**실제로 사람이 그 말로 검색해 들어온 적이 있으면** 수요 프록시보다 이걸 믿는다.
+
+    자동완성 제안 수는 '검색 활동이 있나'의 프록시일 뿐인데, 우리는 그걸 유일한
+    수요 신호로 써 왔다. 그러면서 정작 **실측 유입어**(Creator Advisor 유입분석)는
+    엔진이 한 번도 보지 않았다 — 우리가 가진 유일한 정답지인데.
+    7/26~27 유입어 4개 중 3개(휴대용led응원피켓·vip피켓·비제이 전광판 구매)를
+    자동완성은 0으로 본다. 프록시 0 = 발행 후순위 = 실제로 들어오던 판을 스스로 버렸다.
+
+    표본이 작으므로(하루 1~5명) 1.0 이 아니라 0.9 를 **하한**으로만 준다.
+    """
+    if not kw:
+        return 0.0
+    try:
+        m = _load(ROOT / "data" / "metrics.json", {})
+        qs = {q.get("q", "").replace(" ", "").lower()
+              for rows in (m.get("inflow_queries") or {}).values() for q in rows}
+    except Exception:
+        return 0.0
+    return 0.9 if kw.replace(" ", "").lower() in qs else 0.0
+
+
 def _user_priority(kw: str) -> float:
     """운영자가 대시보드 '키워드' 탭에 직접 넣은 키워드면 가산한다.
 
@@ -451,6 +473,8 @@ def rank_queue() -> list[dict]:
         # ★모바일 경쟁이 비어 있는 판은 자동완성 수요와 무관하게 기회다(2026-07-30 실측).
         # opportunity.score 가 이미 그 판정을 담고 있으므로 하한으로 쓴다.
         demand_s = max(demand_s, _sparse_score(kw))
+        # ★실측 유입어는 프록시보다 위다 — 그 말로 사람이 실제로 들어온 적이 있다.
+        demand_s = max(demand_s, _proven_inflow_score(kw))
         explore = 1 - pub_per_seg[seg] / max_pub      # 적게 발행된 세그먼트 ↑
         diversity = rem_per_seg[seg] / max_rem         # 잔량 많은 세그먼트 ↑
         base = (w["demand"] * demand_s + w["seg"] * seg_s + w["seo"] * seo_s
