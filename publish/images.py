@@ -320,6 +320,22 @@ def pick_images(draft_path, n: int, advance: bool = True) -> tuple[list[Path], l
     return picks, used_inbox
 
 
+def spread_slots(slots: list[int], n_images: int) -> set[int]:
+    """이미지가 슬롯보다 적을 때 **어느 슬롯에 넣을지**를 고르게 고른다.
+
+    앞에서부터 순서대로 채우면 사진이 글 앞머리에만 몰리고 후반부(FAQ·마무리)는
+    텍스트 벽이 된다. 원본 사진을 글당 3장으로 제한한 뒤 실제 삽입이 4~5장인데
+    슬롯은 7~10개라 이 문제가 매 글에서 생긴다.
+    첫 슬롯은 항상 쓴다 — 첫 장이 목록 썸네일(대표 이미지)이기 때문.
+    """
+    if n_images >= len(slots) or n_images <= 0:
+        return set(slots)
+    if n_images == 1:
+        return {slots[0]}
+    span = len(slots) - 1
+    return {slots[round(k * span / (n_images - 1))] for k in range(n_images)}
+
+
 def mark_inbox_used(paths: list[Path]) -> None:
     if not paths:
         return

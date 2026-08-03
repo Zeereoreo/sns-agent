@@ -65,8 +65,32 @@ def add_gallery(path: Path, target: int | None = None, apply: bool = False) -> i
     return need
 
 
+def remove_gallery(path: Path, apply: bool = False) -> int:
+    """갤러리 섹션을 통째로 뺀다. 제거한 슬롯 수 반환.
+
+    2026-08-03: 원본 블로그 사진 복제가 색인 이탈의 원인 후보로 드러나 글당 3장으로
+    제한했다(images.ORIGIN_MAX_PER_POST). 그러면 실제 삽입이 4~5장인데 갤러리 슬롯은
+    글당 14.8개나 남아, 발행하면 **'실제 제작 사례' 제목과 안내문만 있고 사진이 0장인
+    빈 섹션**이 된다. 채울 사진이 없는 자리는 두는 것보다 없는 게 낫다.
+    새 사진이 인박스에 들어오면 add_gallery 로 다시 넣으면 된다.
+    """
+    text = path.read_text(encoding="utf-8")
+    i = text.find(HEAD)
+    if i < 0:
+        return 0
+    rest = text[i + len(HEAD):]
+    # 갤러리 다음에 오는 첫 소제목 / 문의줄 / 태그줄 앞에서 끊는다.
+    ends = [e for e in (rest.find("\n## "), rest.find("\n👉"), rest.find("\n#")) if e >= 0]
+    j = i + len(HEAD) + (min(ends) + 1 if ends else len(rest))
+    n = text[i:j].count(MARKER)
+    if apply:
+        path.write_text(text[:i] + text[j:], encoding="utf-8")
+    return n
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--remove", action="store_true", help="갤러리 섹션을 뺀다(사진이 부족할 때)")
     ap.add_argument("--apply", action="store_true", help="실제로 파일을 고친다(기본은 미리보기)")
     ap.add_argument("--only", default="", help="초안 이름 접두사(예: a21)")
     ap.add_argument("--target", type=int, default=None,
@@ -84,13 +108,21 @@ def main() -> None:
         if p.name[0] in SKIP_SEGMENTS:
             continue
         before = p.read_text(encoding="utf-8").count(MARKER)
+        if a.remove:
+            n = remove_gallery(p, apply=a.apply)
+            if n:
+                done += 1
+                total += n
+                print(f"  {p.stem[:44]:<44} 이미지 {before} → {before - n} (-{n})")
+            continue
         n = add_gallery(p, target=a.target, apply=a.apply)
         if n:
             done += 1
             total += n
             print(f"  {p.stem[:44]:<44} 이미지 {before} → {before + n} (+{n})")
     verb = "적용" if a.apply else "미리보기"
-    print(f"[{verb}] 초안 {done}편 · 슬롯 +{total}")
+    sign = "-" if a.remove else "+"
+    print(f"[{verb}] 초안 {done}편 · 슬롯 {sign}{total}")
     if not a.apply and done:
         print("실제로 넣으려면 --apply 를 붙이세요.")
 

@@ -334,12 +334,19 @@ def publish(draft_path: str, image_dir: str | None = None,
         try:
             page.locator(SEL["body"]).first.click()
             _pause()
+            # 이미지가 슬롯보다 적으면 앞에서부터 채우지 않고 **글 전체에 고르게** 배치한다.
+            # (원본 사진 제한 뒤 삽입 4~5장 / 슬롯 7~10개 — 앞머리에만 몰리면 후반이 텍스트 벽)
+            from publish.images import spread_slots  # noqa: PLC0415
+            _slots = [i for i, b in enumerate(data["blocks"]) if b["kind"] == "image"]
+            _use = spread_slots(_slots, len(images))
             img_i = 0
-            for blk in data["blocks"]:
+            for _bi, blk in enumerate(data["blocks"]):
                 if blk["kind"] == "image":
                     # images 는 image_paths/image_dir 어느 쪽으로 받았든 채워져 있다.
                     # (예전엔 image_dir 을 조건으로 봐서 스케줄러 경로의 이미지가 통째로 누락됐음)
-                    if img_i < len(images):
+                    # 고르게 배치: 선택되지 않은 슬롯은 건너뛴다(단, 반드시 continue —
+                    # 여기서 안 걸러내면 이미지 블록이 아래 heading/text 분기로 샌다).
+                    if _bi in _use and img_i < len(images):
                         ok_img = _insert_image(page, images[img_i])
                         img_i += 1
                         # 캡션은 이미지가 실제로 삽입됐을 때만. (실패 시 고아 '▲ 캡션' 방지)
