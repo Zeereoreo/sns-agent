@@ -1163,6 +1163,22 @@ def run_diagnostics(d) -> list[dict]:
     else:
         add("사진 풀", "ok", f"a{segs['a']} · b{segs['b']} · c{segs['c']} · 인박스{img['inbox']}")
 
+    # 6-1) 사진 출처 — 원본 블로그(made-us) 사진을 얼마나 재업로드하고 있나.
+    # 유사문서를 텍스트로만 재고 이미지는 한 번도 안 쟀다. 그 사이 하루 투입량이
+    # 4~10장(유입 있던 구간) → 63~69장(유입 0)까지 늘어 있었다. 안 보이면 없는 것과 같다.
+    try:
+        n_org = sum(1 for p in pool if imgmod.is_origin_photo(p))
+        pct = round(100 * n_org / len(pool)) if pool else 0
+        cap = imgmod.ORIGIN_MAX_PER_POST
+        if pct >= 50:
+            add("사진 출처", "warn",
+                f"풀의 {pct}%({n_org}/{len(pool)}장)가 원본 블로그 사진 — 글당 {cap}장으로 제한 중",
+                "새로 찍은 사진을 이미지 탭 인박스에 넣으면 제한 없이 쓰이고 규격(20장)도 회복됩니다")
+        else:
+            add("사진 출처", "ok", f"원본 재사용 {pct}% · 글당 상한 {cap}장")
+    except Exception:
+        pass
+
     # 6-2) 콘텐츠 품질(전환 게이트) — 구체 수치·실답변이 없는 글은 순위가 안 오른다
     try:
         import growth as _g

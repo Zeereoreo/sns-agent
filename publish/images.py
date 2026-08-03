@@ -22,6 +22,49 @@ INBOX_DIR = PHOTO_DIR / "inbox"
 USED_DIR = PHOTO_DIR / "used"
 DATA_DIR = ROOT / "data"
 ROT_FILE = DATA_DIR / "photo_rotation.json"
+HARVEST_MANIFEST = PHOTO_DIR / "_harvest" / "manifest.json"
+
+# 🔴 사진 풀 519장 중 493장(95%)이 **원본 블로그 made-us 에서 그대로 수확한 사진**이다
+# (harvest_photos.py). 원본은 정상 색인·구글 상위인데 우리(made-us2)는 검색에서 통째로
+# 빠져 있다. 즉 네이버가 보기에 우리는 '남의 블로그 이미지를 대량 재업로드하는 신생
+# 블로그'다. 유사문서를 텍스트로만 재고(평균 8.5%, "중복 아님") **이미지는 한 번도 안 쟀다.**
+#
+# 실측(발행 로그의 신규 발행분 사진 투입량):
+#   7/16~24  하루 4~10장 (글당 1.3~3.3장)  → 이 구간엔 검색 유입이 매일 있었다
+#   7/27     12장 · 7/28 17장 (글당 6~8.5장) → **유입이 이 경계에서 0으로 붕괴**
+#   8/01~03  하루 63~69장 (글당 23장)      → 회복을 기다리며 원인 후보를 3배로 키우고 있었다
+# 상한 3 = 유입이 살아 있던 구간의 글당 실측 상한. '안전이 확인된 마지막 지점'이다.
+# 인과는 확정이 아니라 정황(시점 일치 + 95% 복제)이라, 되돌릴 수 있게 상수 하나로 뒀다.
+ORIGIN_MAX_PER_POST = 3
+
+# 인박스(사용자가 직접 넣은 새 사진)는 이 상한에 걸리지 않는다 — 우리 사진이면
+# 20장 규격을 그대로 채워도 복제 신호가 아니다. 회복 경로는 '새 사진'이다.
+_origin_sizes: set[int] | None = None
+
+
+def _origin_size_set() -> set[int]:
+    """원본 블로그에서 수확한 사진의 바이트 크기 집합(풀 파일은 이름이 바뀌어 크기로 대조)."""
+    global _origin_sizes
+    if _origin_sizes is None:
+        sizes: set[int] = set()
+        try:
+            names = json.loads(HARVEST_MANIFEST.read_text(encoding="utf-8"))
+            for name in names:
+                f = HARVEST_MANIFEST.parent / name
+                if f.exists():
+                    sizes.add(f.stat().st_size)
+        except Exception:
+            pass
+        _origin_sizes = sizes
+    return _origin_sizes
+
+
+def is_origin_photo(p: Path) -> bool:
+    """이 사진이 원본 블로그(made-us)에서 수확한 것인가."""
+    try:
+        return Path(p).stat().st_size in _origin_size_set()
+    except OSError:
+        return False
 
 # 초안 코드 -> 대표 인포그래픽 파일명 (주제가 명확히 맞는 것만; 나머지는 세그먼트 기본)
 INFOGRAPHIC_MAP = {
@@ -255,6 +298,20 @@ def pick_images(draft_path, n: int, advance: bool = True) -> tuple[list[Path], l
     # 인포그래픽(흰 배경 도해)이 실물 사진들 사이에 끼면 톤이 튄다 → 맨 뒤로 보낸다.
     # 대표(첫 장)로 남아야 하는 경우(위 스왑이 없었던 글)는 그대로 둔다.
     picks = picks[:n]
+
+    # 원본 블로그 출신 사진은 글당 ORIGIN_MAX_PER_POST 장까지(상단 주석의 실측 근거).
+    # 인포그래픽(우리가 만든 것)과 인박스 새 사진은 제한하지 않는다 — 복제가 아니므로.
+    # 남는 슬롯은 발행 쪽에서 그냥 건너뛴다(naver.py 의 `img_i < len(images)`).
+    seen_origin = 0
+    kept: list[Path] = []
+    for p in picks:
+        if p.parent == PHOTO_DIR and is_origin_photo(p):
+            seen_origin += 1
+            if seen_origin > ORIGIN_MAX_PER_POST:
+                continue
+        kept.append(p)
+    picks = kept
+
     if len(picks) > 2 and picks[0].parent != IMG_DIR:
         info = [p for p in picks if p.parent == IMG_DIR]
         if info:

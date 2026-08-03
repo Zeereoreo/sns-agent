@@ -79,6 +79,16 @@ def t_parser():
     seq_sizes = [len(g) for g in _gp2(allpool)
                  if g and not re.search(r"_(p\d+)_", g[0].name)]
     check("순번 묶음은 너무 크지 않다", max(seq_sizes) <= GROUP_MAX, max(seq_sizes))
+    # 원본 블로그(made-us) 사진 재업로드 상한 — 이게 조용히 풀리면 색인 이탈을 재생산한다.
+    # 하루 투입량이 4~10장(유입 있던 구간)에서 63~69장(유입 0)까지 늘어난 걸 9일 뒤에야 봤다.
+    from publish.images import ORIGIN_MAX_PER_POST, is_origin_photo
+    big, _ = pick_images("drafts/a04_reaction-picket-bigfan.md", 23, advance=False)
+    n_org = sum(1 for p in big if p.parent == PHOTO_DIR and is_origin_photo(p))
+    check("원본 사진은 글당 상한까지만", n_org <= ORIGIN_MAX_PER_POST, n_org)
+    check("상한이 정상 색인 구간(글당 3장) 이하", ORIGIN_MAX_PER_POST <= 3, ORIGIN_MAX_PER_POST)
+    check("원본 사진 판별이 실제로 동작", any(is_origin_photo(p) for p in allpool[:80]),
+          "manifest 대조 실패 — 상한이 아무것도 안 막는다")
+
     check("대표는 항상 실물 사진", picks[0].parent != IMG_DIR, picks[0].name)
     check("인포그래픽은 사이에 안 낀다",
           all(p.parent != IMG_DIR for p in picks[1:-1]),
