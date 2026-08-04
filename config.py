@@ -35,6 +35,23 @@ SEGMENT_CATEGORY = {
     "c": "간판·네온사인·클럽 LED",
 }
 
+# ----- 문의 채널 (글 마무리에 자동으로 붙는다) -----
+# 원본 made-us 글 6편을 열어 실측: 본문에 **네이버 톡톡만** 들어가 있다(talk.naver.com/wc1z7z).
+# 카톡채널·스마트스토어는 원본 본문/블로그 홈 어디서도 URL 이 안 잡혔다 —
+# 주소를 모르는 채로 넣으면 죽은 링크가 박히므로 **빈 값이면 아예 출력하지 않는다.**
+# 사용자가 주소를 주면 여기(또는 .env) 한 줄만 채우면 다음 발행부터 자동 반영된다.
+CONTACT_CHANNELS = [
+    ("네이버 톡톡", os.environ.get("CH_NAVER_TALK", "https://talk.naver.com/wc1z7z")),
+    ("카카오톡 채널", os.environ.get("CH_KAKAO", "")),
+    ("스마트스토어", os.environ.get("CH_SMARTSTORE", "")),
+]
+
+
+def contact_lines() -> list[str]:
+    """값이 채워진 채널만 '👉 이름: URL' 줄로 만든다."""
+    return [f"👉 {name}: {url}" for name, url in CONTACT_CHANNELS if url.strip()]
+
+
 # ----- 경로 -----
 DATA_DIR = ROOT / "data"
 DRAFTS_DIR = ROOT / "drafts"

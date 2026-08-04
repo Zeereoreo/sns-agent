@@ -389,6 +389,13 @@ def publish(draft_path: str, image_dir: str | None = None,
                 page.keyboard.press("Enter")
                 page.keyboard.press("Enter")
                 _pause(0.2, 0.6)
+            # 문의 채널 — 원본 made-us 처럼 본문 끝에 붙인다(값이 있는 것만).
+            # 초안 51편을 일일이 고치는 대신 발행 경로에서 한 번에 넣는다. 주소가 바뀌면
+            # config.CONTACT_CHANNELS 한 곳만 고치면 되고, 빈 값은 아예 출력되지 않는다.
+            for line in config.contact_lines():
+                page.keyboard.type(line, delay=random.randint(15, 45))
+                page.keyboard.press("Enter")
+                _pause(0.15, 0.4)
             _shot(page, "03_body")
         except Exception as e:
             print("본문 입력 실패(선택자 보정 필요):", e)

@@ -81,6 +81,13 @@ def t_parser():
     check("순번 묶음은 너무 크지 않다", max(seq_sizes) <= GROUP_MAX, max(seq_sizes))
     # 원본 블로그(made-us) 사진 재업로드 상한 — 이게 조용히 풀리면 색인 이탈을 재생산한다.
     # 하루 투입량이 4~10장(유입 있던 구간)에서 63~69장(유입 0)까지 늘어난 걸 9일 뒤에야 봤다.
+    # 문의 채널: 주소가 빈 채널은 절대 출력되면 안 된다(죽은 링크가 글마다 박힌다).
+    import config as _cfg
+    _lines = _cfg.contact_lines()
+    check("문의 채널은 값 있는 것만 출력",
+          len(_lines) == sum(1 for _, u in _cfg.CONTACT_CHANNELS if u.strip()), _lines)
+    check("문의 채널 줄은 URL 을 포함", all("http" in x for x in _lines), _lines)
+
     from publish.images import ORIGIN_MAX_PER_POST, is_origin_photo
     big, _ = pick_images("drafts/a04_reaction-picket-bigfan.md", 23, advance=False)
     n_org = sum(1 for p in big if p.parent == PHOTO_DIR and is_origin_photo(p))
@@ -135,7 +142,18 @@ def t_parser():
     check("연속 2편이 같은 키워드가 아님",
           all(qq[i]["keyword"] != qq[i + 1]["keyword"] for i in range(min(4, len(qq) - 1))))
 
-    check("지역형 판은 강하게 할인", pen("노래방 간판") <= 0.35, pen("노래방 간판"))
+    # 지역형 할인: 특정 키워드에 의존하면 재스캔으로 데이터가 바뀔 때 깨진다.
+    # (2026-08-04 실제로 '노래방 간판'이 n=0 으로 덮어써져 이 테스트가 실패했고,
+    #  그 덕에 '빈 스캔이 실측을 지우는' 버그를 잡았다. 이제 조건에 맞는 키워드로 검증한다.)
+    import json as _json
+    _rows = _json.loads((ROOT / "data" / "opportunities.json").read_text(encoding="utf-8"))
+    _local = [r for r in _rows if (r.get("n") or 0) >= 5 and (r.get("local") or 0) / r["n"] >= 0.6]
+    if _local:
+        _k = _local[0]["keyword"]
+        check("지역형 판은 강하게 할인", pen(_k) <= 0.35, f"{_k}={pen(_k)}")
+    else:
+        check("지역형 판정 표본이 남아 있다", False,
+              "지역형으로 측정된 키워드가 0개 — 스캔이 실측을 지웠는지 확인")
 
     # 제목 정책(2026-07-29 수정): 길이로 거르지 않는다. 이 판의 승자는 나열형 장문이고
     # (원본 made-us 구글 1위 글이 104자), 짧게 쓰는 건 우리뿐이었다. 상한은 네이버 100자만.

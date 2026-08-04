@@ -287,6 +287,13 @@ def scan(seeds: list[str], max_candidates: int) -> None:
         except Exception:
             pass
     for r in rows:
+        old = merged.get(r["keyword"])
+        # 🔴 표본 0 인 새 결과가 기존 **실측**을 지우면 안 된다(2026-08-04 실제 발생).
+        # '노래방 간판'은 7/27 에 상위 10개 중 7개가 지역 시공후기로 측정돼 엔진이 0.3배
+        # 할인하고 있었는데, 어느 재스캔이 n=0·local=0 으로 덮어써 **할인이 통째로 풀렸다**
+        # (테스트 '지역형 판은 강하게 할인'이 잡았다). 수집 실패와 '지역형이 아님'은 다르다.
+        if old and (r.get("n") or 0) == 0 and (old.get("n") or 0) > 0:
+            continue
         merged[r["keyword"]] = r
     out = sorted(merged.values(), key=lambda r: -r["score"])
     OUT.parent.mkdir(exist_ok=True)
