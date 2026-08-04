@@ -42,8 +42,8 @@ SEGMENT_CATEGORY = {
 # 사용자가 주소를 주면 여기(또는 .env) 한 줄만 채우면 다음 발행부터 자동 반영된다.
 CONTACT_CHANNELS = [
     ("네이버 톡톡", os.environ.get("CH_NAVER_TALK", "https://talk.naver.com/wc1z7z")),
-    ("카카오톡 채널", os.environ.get("CH_KAKAO", "")),
-    ("스마트스토어", os.environ.get("CH_SMARTSTORE", "")),
+    ("카카오톡 채널", os.environ.get("CH_KAKAO", "https://pf.kakao.com/_ReExij")),
+    ("스마트스토어", os.environ.get("CH_SMARTSTORE", "https://smartstore.naver.com/madeus")),
 ]
 
 
