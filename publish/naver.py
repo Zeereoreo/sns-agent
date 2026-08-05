@@ -392,10 +392,15 @@ def publish(draft_path: str, image_dir: str | None = None,
             # 문의 채널 — 원본 made-us 처럼 본문 끝에 붙인다(값이 있는 것만).
             # 초안 51편을 일일이 고치는 대신 발행 경로에서 한 번에 넣는다. 주소가 바뀌면
             # config.CONTACT_CHANNELS 한 곳만 고치면 되고, 빈 값은 아예 출력되지 않는다.
+            # 🔴 URL 뒤에 곧바로 Enter 를 치면 안 된다(2026-08-05 c23 에서 실제로 깨졌다).
+            # 에디터가 방금 친 URL 을 링크로 **비동기 변환**하는데 그 사이에 다음 줄 입력이
+            # 끼어들면 URL 중간에서 문단이 갈린다(`https://pf.kaka` | `o.com/_ReExij`).
+            # 변환이 끝날 시간을 준 뒤 Enter, 그리고 커서가 안정될 때까지 한 번 더 쉰다.
             for line in config.contact_lines():
                 page.keyboard.type(line, delay=random.randint(15, 45))
+                _pause(0.6, 1.0)
                 page.keyboard.press("Enter")
-                _pause(0.15, 0.4)
+                _pause(0.6, 1.0)
             _shot(page, "03_body")
         except Exception as e:
             print("본문 입력 실패(선택자 보정 필요):", e)
