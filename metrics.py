@@ -410,9 +410,16 @@ def collect(force_ranks: bool = False) -> dict:
             for name, kw in targets:
                 r, n_results = _rank_of(page, kw, blog)
                 if r is None and n_results == 0:
-                    # SERP가 비어있음 = 스크래핑 실패/차단. '이탈'로 기록하지 않고 건너뜀.
+                    # 🔴 2026-08-06 실측: 하루 41건 중 11건(27%)이 여기서 버려지고 있었다.
+                    # 연속 요청이 몰릴 때 나는 일시적 실패라 **한 번 쉬었다 재시도**하면
+                    # 상당수가 살아난다. 버려진 키워드는 승산 신호에서 통째로 빠지고
+                    # 그만큼 큐 순서가 부정확해진다.
+                    page.wait_for_timeout(2500)
+                    r, n_results = _rank_of(page, kw, blog)
+                if r is None and n_results == 0:
+                    # 재시도해도 비었으면 스크래핑 실패/차단. '이탈'로 기록하지 않고 건너뜀.
                     failures += 1
-                    print(f"[순위] '{kw}' -> 수집 실패(SERP 비어있음), 기록 안 함")
+                    print(f"[순위] '{kw}' -> 수집 실패(재시도 후에도 SERP 비어있음), 기록 안 함")
                     continue
                 ranks[kw] = r
                 print(f"[순위] '{kw}' -> {r if r else '30위권 밖'}")
