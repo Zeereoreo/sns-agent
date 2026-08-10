@@ -405,6 +405,20 @@ def collect(force_ranks: bool = False) -> dict:
             if kw not in kw_map.values():
                 targets.append((f"(직접 추가) {kw}", kw))
 
+        # 🔴 **실제로 사람이 들어온 검색어**를 순위 추적에 자동으로 넣는다(2026-08-10).
+        # 그동안 이게 빠져 있었다: 실측으로 순위에 든 9개 중 유입이 온 건 2개뿐이고,
+        # 반대로 실측 유입어 8개 중 순위를 추적하던 것도 2개뿐이었다.
+        # 즉 **검색하는 사람이 없는 판에서 1위를 재고, 정작 사람이 오는 말은 몇 위인지
+        # 모르고 있었다.** 유입어는 수요 프록시가 0으로 보는 말이라 자동완성으로는 영영
+        # 발견되지 않는다 — 유일한 정답지이므로 나올 때마다 추적 목록에 들어가야 한다.
+        _seen = {kw for _, kw in targets}
+        for _qs in (data.get("inflow_queries") or {}).values():
+            for _q in _qs:
+                _kw = (_q.get("q") or "").strip()
+                if _kw and _kw not in _seen:
+                    _seen.add(_kw)
+                    targets.append((f"(실측 유입) {_kw}", _kw))
+
         if need_ranks and targets:
             ranks, failures = {}, 0
             for name, kw in targets:
