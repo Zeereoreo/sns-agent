@@ -411,13 +411,25 @@ def collect(force_ranks: bool = False) -> dict:
         # 즉 **검색하는 사람이 없는 판에서 1위를 재고, 정작 사람이 오는 말은 몇 위인지
         # 모르고 있었다.** 유입어는 수요 프록시가 0으로 보는 말이라 자동완성으로는 영영
         # 발견되지 않는다 — 유일한 정답지이므로 나올 때마다 추적 목록에 들어가야 한다.
+        # 긴 유입어는 **짧게 끊어서도** 같이 잰다(2026-08-10 사용자 지적).
+        # 순위는 정확히 그 문자열로만 재기 때문에 `엑셀led 판넬 피켓 제작` 1위가
+        # `판넬 피켓` 순위를 뜻하지 않는다(우리 데이터에도 `vip피켓`과 `VIP 피켓`이
+        # 각각 따로 잡힌다 — 띄어쓰기만 달라도 다른 판이다).
+        # 3어절 이상이면 앞 2어절·뒤 2어절을 함께 추적해 어느 조각이 실제 판인지 본다.
         _seen = {kw for _, kw in targets}
         for _qs in (data.get("inflow_queries") or {}).values():
             for _q in _qs:
                 _kw = (_q.get("q") or "").strip()
-                if _kw and _kw not in _seen:
-                    _seen.add(_kw)
-                    targets.append((f"(실측 유입) {_kw}", _kw))
+                if not _kw:
+                    continue
+                _cands = [_kw]
+                _parts = _kw.split()
+                if len(_parts) >= 3:
+                    _cands += [" ".join(_parts[:2]), " ".join(_parts[-2:])]
+                for _c in _cands:
+                    if _c not in _seen:
+                        _seen.add(_c)
+                        targets.append((f"(실측 유입) {_c}", _c))
 
         if need_ranks and targets:
             ranks, failures = {}, 0
