@@ -46,6 +46,10 @@ RESULT_MEANING = {
     "267009": ("실행 중", "ok"),
     "-2147020576": ("배터리 전원이라 실행 거부됨", "bad"),
     "1": ("스크립트 오류로 종료", "bad"),
+    # 2026-08-11 실제 발생: 아침 발행이 제목 입력 직후 죽었다(스크린샷 02_title 에서 끊김).
+    # publish_state 에 실패 기록조차 안 남아 status 는 '0/3'으로만 보였고 진단은 '정상'이라
+    # 말했다. 0xC000013A = 프로세스가 강제 종료된 것(메모리 압박·콘솔 종료 등).
+    "-1073741510": ("프로세스가 강제 종료됨(메모리 부족 등)", "bad"),
 }
 
 
@@ -1146,6 +1150,34 @@ def run_diagnostics(d) -> list[dict]:
         add("자동 실행 작업", "warn", f"{len(bad_tasks)}개 경고 상태")
     else:
         add("자동 실행 작업", "ok", f"{len(d['tasks'])}개 정상")
+
+    # 3-1) 🔴 **발행이 시작됐는데 결과가 없는 것**을 직접 잡는다(2026-08-11 신설).
+    # 종료 코드 표에만 의존하면 새로운 실패 코드가 나올 때마다 놓친다. 실제로 이날
+    # 아침 발행이 제목 입력 직후 죽었는데(0xC000013A) 그 코드가 표에 없어 'warn'으로
+    # 떨어졌고, 진단은 warn 을 세지 않아 **"3개 정상"이라고 말했다.**
+    # 코드와 무관한 신호: 스케줄러가 '대상:'까지 찍은 뒤 publish_state 에 아무 기록도
+    # 남기지 않았다면 그 실행은 중간에 끊긴 것이다(성공·실패·dry-run 모두 기록을 남긴다).
+    try:
+        _lines = (ROOT / "data" / "scheduler.log").read_text(
+            encoding="utf-8", errors="replace").splitlines()
+        _starts = [i for i, ln in enumerate(_lines) if ln.startswith("=====")]
+        _stamp = _lines[_starts[-1]].strip("= ").strip() if _starts else ""
+        _blk = _lines[_starts[-1]:] if _starts else []
+        _targeted = next((ln for ln in _blk if "[스케줄러] 대상:" in ln), "")
+        _st = _load_json(ROOT / "data" / "publish_state.json", {})
+        _last = (_st.get("log") or [])[-1] if (_st.get("log") or []) else {}
+        _last_stamp = f"{_last.get('date','')} {_last.get('time','')}".strip()
+        # 로그 시각(YYYY-MM-DD HH:MM:SS) 과 기록 시각(YYYY-MM-DD HH:MM) 을 분 단위로 비교
+        if _targeted and _stamp[:16] > _last_stamp[:16]:
+            add("발행 중단", "bad",
+                f"{_stamp[:16]} 실행이 대상까지 잡고 **결과 없이 끊겼습니다** "
+                f"(마지막 기록 {_last_stamp})",
+                "작업 스케줄러 Last Result 와 drafts/_debug 스크린샷을 확인하세요. "
+                "여유 RAM 부족이면 브라우저가 뜨다 죽습니다")
+        else:
+            add("발행 중단", "ok", "마지막 실행이 결과까지 기록됨")
+    except Exception:
+        pass
 
     # 4) 초안 파싱
     fails, thin = [], []
