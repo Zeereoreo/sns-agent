@@ -452,14 +452,27 @@ def _zero_demand_penalty(kw: str, dmap: dict) -> float:
     return 1.0 if _sparse_field(kw) else 0.3
 
 
-def _cannibal_penalty(kw: str, published_kws: set) -> float:
+def _cannibal_penalty(kw: str, published_kws: set, ranked: dict | None = None) -> float:
     """같은 타깃 키워드로 이미 발행한 글이 있으면 할인(자기잠식 방지).
 
     2026-07-28 실측: 초안 44편이 35종 키워드를 쓰는데 **'아이스버킷' 하나에 7편**이 몰려 있었다.
     같은 키워드로 여러 편을 올리면 네이버가 어느 글을 대표로 볼지 흐려져 서로 순위를 깎아먹는다.
     이미 그 키워드로 발행한 글이 있으면 새 글보다 **그 글을 키우는 게** 낫다.
+
+    ★단, **죽은 글은 잠식하지 않는다**(2026-08-13). 전수조사에서 발행 48편 중 29편이
+    색인에서 빠져 있었다(7/22~8/04 = 2/34편). 그 글들은 검색에 존재하지 않으므로
+    깎을 자리도 없다 — 경쟁 상대가 아니라 시체다. 그런데 이 페널티가 걸려서
+    **죽은 글을 되살리는 새 글이 구조적으로 큐 바닥에 묶였다**(a35 닉네임 피켓 제작).
+    판정은 순위로 한다: 그 키워드로 우리가 순위에 잡히면 살아 있는 글이 있는 것이고,
+    30위 밖이면 잠식할 자리 자체가 없다.
     """
-    return 0.35 if kw and kw in published_kws else 1.0
+    if not (kw and kw in published_kws):
+        return 1.0
+    # 키가 있고 값이 null 이어야 '실측 30위 밖'이다. 키가 아예 없으면 수집 실패이므로
+    # 판단 근거가 없고, 그때는 보수적으로 잠식을 유지한다.
+    if ranked is not None and kw in ranked and not isinstance(ranked[kw], int):
+        return 1.0          # 발행은 했지만 그 키워드로 순위가 없다 = 잠식 대상 아님
+    return 0.35
 
 
 def rank_queue() -> list[dict]:
@@ -516,7 +529,7 @@ def rank_queue() -> list[dict]:
         base = (w["demand"] * demand_s + w["seg"] * seg_s + w["seo"] * seo_s
                 + w["explore"] * explore + w["diversity"] * diversity)
         fit = _fit_multiplier(kw)                      # 손님 우선순위(BJ/스트리머 우선)
-        cann = _cannibal_penalty(kw, published_kws)    # 같은 키워드 중복 발행 방지
+        cann = _cannibal_penalty(kw, published_kws, latest)   # 중복 발행 방지(죽은 글은 제외)
         zero = _zero_demand_penalty(kw, dmap)          # 실측 수요 0 = 검색 유입 없음
         noblog = _no_blog_penalty(kw)                  # SERP 에 블로그 자리가 없는 판
         pick = _user_priority(kw)                      # 운영자가 직접 넣은 타깃 키워드

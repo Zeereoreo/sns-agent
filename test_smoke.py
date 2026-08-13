@@ -148,6 +148,11 @@ def t_parser():
     # 자기잠식: 같은 키워드로 여러 편을 올리면 서로 순위를 깎는다
     check("발행된 키워드는 할인", growth._cannibal_penalty("아이스버킷", {"아이스버킷"}) == 0.35)
     check("새 키워드는 할인 없음", growth._cannibal_penalty("오픈 네온사인", {"아이스버킷"}) == 1.0)
+    # 죽은 글은 잠식하지 않는다 — 검색에 없으니 깎을 자리도 없다(2026-08-13 전수조사)
+    check("실측 30위 밖이면 잠식 면제", growth._cannibal_penalty("x", {"x"}, {"x": None}) == 1.0)
+    check("순위 있으면 잠식 유지", growth._cannibal_penalty("x", {"x"}, {"x": 3}) == 0.35)
+    check("미측정은 보수적으로 잠식", growth._cannibal_penalty("x", {"x"}, {}) == 0.35)
+    check("ranked 없이도 기존대로", growth._cannibal_penalty("x", {"x"}) == 0.35)
     # 보장하는 것: 같은 키워드가 여럿이면 1등 외에는 반드시 할인이 붙는다.
     # (절대 순위는 다른 신호에 따라 바뀔 수 있어 '상위 N에 없음'으로 검증하면 불안정하다.)
     qq = growth.rank_queue()
