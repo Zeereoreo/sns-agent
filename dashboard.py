@@ -1091,6 +1091,26 @@ def run_diagnostics(d) -> list[dict]:
             add("네이버 색인", "bad",
                 f"발행글 {idx.get('sampled')}편을 제목으로 검색해도 안 나오고 **순위도 0개**",
                 "7/26 까지는 색인돼 있었다(검색유입 5명). 발행글 편집을 멈추고 새 글만 올리며 회복 관찰")
+    elif idx.get("recent") or idx.get("older"):
+        # 🔴 합산만 보면 '언제부터 살아났나'가 안 보인다. 2026-08-13 전수조사에서
+        # 48편 중 29편(60%)이 죽어 있는데 경계가 8/05 로 칼같았다(원본 사진을 글당
+        # 3장으로 제한한 8/03 직후부터 살아남). 표본 3편으로는 늘 '1/3' 만 보였다.
+        rec, old = idx.get("recent") or {}, idx.get("older") or {}
+        rs, rf = rec.get("sampled", 0), rec.get("found", 0)
+        os_, of = old.get("sampled", 0), old.get("found", 0)
+        detail = f"최근 {rf}/{rs}편 · 이전 {of}/{os_}편 ({idx.get('checked','')})"
+        if rs and rf == rs and os_ and of == 0:
+            add("네이버 색인", "warn",
+                f"**새 글은 색인되고 옛 글은 빠져 있다** — {detail}",
+                "옛 글은 라이브 편집으로 되살리지 말 것(그게 원인이었다). "
+                "값어치 있는 키워드는 새 글로 다시 쓴다")
+        elif rs and rf == 0:
+            add("네이버 색인", "bad", f"**새 글이 색인되지 않는다** — {detail}",
+                "원본 사진 투입량부터 확인하세요(images.ORIGIN_MAX_PER_POST)")
+        elif rf + of < rs + os_:
+            add("네이버 색인", "warn", f"일부만 색인됨 — {detail}")
+        else:
+            add("네이버 색인", "ok", f"표본 전부 색인됨 — {detail}")
     elif idx.get("found", 0) < idx.get("sampled", 1):
         add("네이버 색인", "warn",
             f"표본 {idx['sampled']}편 중 {idx['found']}편만 색인됨 ({idx.get('checked','')})")

@@ -204,6 +204,15 @@ def t_parser():
     import metrics as _mt
     import opportunity as _op
     check("순위 측정 기본이 모바일", "m.search.naver.com" in inspect.getsource(_mt._rank_of))
+    # 색인은 구간을 나눠 재야 한다 — 합산 '1/3' 으로는 60%가 죽은 것을 못 본다
+    check("색인 표본 구간 분리 함수", callable(_mt._index_samples))
+    _old, _rec = _mt._index_samples(4)
+    check("두 구간이 겹치지 않는다", not (set(_old) & set(_rec)), f"{len(_old)}/{len(_rec)}")
+    check("이전 구간은 오래된 글", bool(_old) and bool(_rec))
+    _isrc = inspect.getsource(_mt.collect)
+    check("구간별로 색인을 잰다", "older" in _isrc and "recent" in _isrc)
+    check("합산 스키마도 유지", "titles_found" in _isrc and "sampled" in _isrc)
+
     # 블로그 결과 0 을 전부 '수집 실패'로 버리면 안 된다 — 페이지가 멀쩡한데 블로그
     # 영역이 없는 판(쇼핑·플레이스)이 따로 있다(2026-08-13 실측: led 피켓·아이스버킷).
     _src = inspect.getsource(_mt.collect)

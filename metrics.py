@@ -354,6 +354,30 @@ def _recent_titles(n: int = 3) -> list[str]:
     return titles[:n - 1] + titles[-1:]     # 오래된 n-1 편 + 최신 1편
 
 
+INDEX_SAMPLE = 4        # 구간별 표본 수(최근 N편 · 이전 N편)
+
+
+def _index_samples(n: int = INDEX_SAMPLE) -> tuple[list[str], list[str]]:
+    """(이전 발행분 표본, 최근 발행분 표본) — **두 구간을 나눠 재야 진실이 보인다.**
+
+    2026-08-13 전수조사: 48편 중 29편(60%)이 색인에서 빠져 있는데 경계가 칼같았다
+    (7/22~8/04 는 2/34, 8/05~8/10 은 16/17 — 원본 사진 제한을 건 8/03 직후부터 살아남).
+    그런데 표본 3편(오래된 2 + 최신 1)으로는 항상 '1/3' 이 나올 뿐이라
+    **'60%가 죽었다'도 '최근 것은 다 산다'도 둘 다 안 보였다.**
+    구간을 나누면 한 줄로 드러난다: "최근 4/4 · 이전 0/4".
+    """
+    state = _load(ROOT / "data" / "publish_state.json", {})
+    titles: list[str] = []
+    for e in state.get("log", []):          # log 는 오래된 것부터
+        if e.get("ok") and not e.get("dry") and e.get("title"):
+            if e["title"] not in titles:
+                titles.append(e["title"])
+    if len(titles) <= 2:
+        return [], titles
+    n = max(1, min(n, len(titles) // 2))
+    return titles[:n], titles[-n:]
+
+
 def _warn_not_indexed(today: str, sampled: int) -> None:
     """색인 0 — 발행을 아무리 해도 검색 유입이 안 생기는 상태라 즉시 알린다."""
     try:
@@ -507,12 +531,31 @@ def collect(force_ranks: bool = False) -> dict:
 
         # ★네이버 색인 여부(하루 1회). 순위보다 앞선 전제 — 색인이 0 이면 순위는 없다.
         if need_ranks:
-            titles = _recent_titles(3)
-            idx = _indexed_count(page, blog, titles)
+            older_t, recent_t = _index_samples()
+            older = _indexed_count(page, blog, older_t) if older_t else None
+            recent = _indexed_count(page, blog, recent_t)
+            idx = None
+            for part in (older, recent):         # 합산은 기존 스키마 유지용
+                if part is None:
+                    continue
+                if idx is None:
+                    idx = {"sampled": 0, "found": 0, "titles_found": []}
+                idx["sampled"] += part["sampled"]
+                idx["found"] += part["found"]
+                idx["titles_found"] += part["titles_found"]
             if idx is not None:
                 idx["checked"] = f"{today} {datetime.now():%H:%M}"
+                # 구간별 수치가 진짜 정보다 — 합산만 보면 '언제부터 살아났나'가 안 보인다.
+                if older:
+                    idx["older"] = {"sampled": older["sampled"], "found": older["found"]}
+                if recent:
+                    idx["recent"] = {"sampled": recent["sampled"], "found": recent["found"]}
                 data["index_status"] = idx
-                print(f"[색인] 제목검색 {idx['found']}/{idx['sampled']}편 확인")
+                seg = ""
+                if older and recent:
+                    seg = (f" (최근 {recent['found']}/{recent['sampled']}"
+                           f" · 이전 {older['found']}/{older['sampled']})")
+                print(f"[색인] 제목검색 {idx['found']}/{idx['sampled']}편 확인{seg}")
                 if idx["found"] == 0:
                     _warn_not_indexed(today, idx["sampled"])
             else:
