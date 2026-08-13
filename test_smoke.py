@@ -124,6 +124,27 @@ def t_parser():
     check("수요 있으면 유지", zd("x", {"x": 3}) == 1.0)
     check("미측정은 할인 없음", zd("x", {}) == 1.0)
 
+    # 블로그 자리가 없는 판은 1위를 해도 유입이 0 — 수요 0 보다 확실한 신호다
+    import json as _js3, tempfile as _tf3
+    from pathlib import Path as _P3
+    _gbak = growth.METRICS
+    with _tf3.TemporaryDirectory() as _td3:
+        try:
+            growth.METRICS = _P3(_td3) / "m.json"
+            growth.METRICS.write_text(_js3.dumps({
+                "serp_no_blog": {"2026-08-13": ["아이스버킷", "led 피켓"]},
+                "ranks": {"2026-08-13": {"led 피켓": 2, "돔페리뇽": None}},
+            }), encoding="utf-8")
+            check("판 없는 키워드는 강하게 할인",
+                  growth._no_blog_penalty("아이스버킷") == growth.NO_BLOG_PENALTY)
+            check("순위가 잡히면 판은 있는 것", growth._no_blog_penalty("led 피켓") == 1.0)
+            check("30위 밖은 판이 있는 것", growth._no_blog_penalty("돔페리뇽") == 1.0)
+            check("관측 없는 키워드는 중립", growth._no_blog_penalty("네온사인") == 1.0)
+            check("빈 키워드는 중립", growth._no_blog_penalty("") == 1.0)
+        finally:
+            growth.METRICS = _gbak
+    check("판 없음이 수요0보다 강한 할인", growth.NO_BLOG_PENALTY < 0.3)
+
     # 자기잠식: 같은 키워드로 여러 편을 올리면 서로 순위를 깎는다
     check("발행된 키워드는 할인", growth._cannibal_penalty("아이스버킷", {"아이스버킷"}) == 0.35)
     check("새 키워드는 할인 없음", growth._cannibal_penalty("오픈 네온사인", {"아이스버킷"}) == 1.0)

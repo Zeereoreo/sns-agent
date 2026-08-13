@@ -405,6 +405,34 @@ def _user_priority(kw: str) -> float:
     return 1.25 if kw.replace(" ", "").lower() in picks else 1.0
 
 
+NO_BLOG_PENALTY = 0.2
+# 근거(2026-08-13 실측): 그 키워드의 모바일 SERP 에 **블로그 영역 자체가 없다**.
+# 결과가 쇼핑·플레이스·광고뿐이라 1위를 해도 유입이 0이다. 수요 0(0.3)보다 확실한
+# 신호다 — 수요는 자동완성 프록시지만 이건 직접 관측이다. 0 이 아니라 0.2 인 이유:
+# 네이버 SERP 구성은 바뀔 수 있고 관측이 며칠치뿐이라, 완전히 죽이지 않고 밀어만 둔다.
+
+
+def _no_blog_penalty(kw: str) -> float:
+    """블로그 노출 자리가 없는 판이면 1위를 해도 방문자가 생기지 않는다.
+
+    2026-08-13 까지 우리는 이 상태를 '수집 실패'로 버렸고, 그래서 해당 키워드는
+    '미측정 = 기회'로 full 점수를 받아 큐를 잘못된 판으로 밀고 있었다.
+    (b 초안 7편이 공유하는 '아이스버킷'이 바로 여기 해당한다.)
+    """
+    m = _load(METRICS, {})
+    nb = m.get("serp_no_blog", {})
+    if not nb or not kw:
+        return 1.0
+    if not any(kw in (nb.get(d) or []) for d in sorted(nb)[-3:]):
+        return 1.0
+    # 같은 기간에 순위가 잡힌 적이 있으면 판은 있는 것이다(관측 흔들림 방어).
+    ranks = m.get("ranks", {})
+    for d in sorted(ranks)[-3:]:
+        if isinstance((ranks.get(d) or {}).get(kw), int):
+            return 1.0
+    return NO_BLOG_PENALTY
+
+
 def _zero_demand_penalty(kw: str, dmap: dict) -> float:
     """검색 수요가 **실측 0**이면 총점을 깎는다 — 단 경쟁이 비어 있으면 깎지 않는다.
 
@@ -490,15 +518,16 @@ def rank_queue() -> list[dict]:
         fit = _fit_multiplier(kw)                      # 손님 우선순위(BJ/스트리머 우선)
         cann = _cannibal_penalty(kw, published_kws)    # 같은 키워드 중복 발행 방지
         zero = _zero_demand_penalty(kw, dmap)          # 실측 수요 0 = 검색 유입 없음
+        noblog = _no_blog_penalty(kw)                  # SERP 에 블로그 자리가 없는 판
         pick = _user_priority(kw)                      # 운영자가 직접 넣은 타깃 키워드
-        total = base * fit * cann * zero * pick
+        total = base * fit * cann * zero * noblog * pick
         rows.append({
             "name": p.name, "seg": seg, "keyword": kw,
             "score": round(total, 4),
             "breakdown": {"demand": round(demand_s, 2), "seg": round(seg_s, 2),
                           "seo": round(seo_s, 2), "explore": round(explore, 2),
                           "diversity": round(diversity, 2), "fit": round(fit, 2),
-                          "pick": round(pick, 2)},
+                          "pick": round(pick, 2), "noblog": round(noblog, 2)},
         })
     rows.sort(key=lambda r: r["score"], reverse=True)
     # 큐 안에서도 같은 키워드가 겹치면 1등만 남기고 나머지는 할인한다.
