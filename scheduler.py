@@ -164,11 +164,17 @@ def run(dry_run: bool = True) -> None:
             age = time.time() - LOCK.stat().st_mtime
         except OSError:
             age = 0
+        print(f"\n===== {datetime.now():%Y-%m-%d %H:%M:%S} =====")
         if age < LOCK_STALE_SEC:
-            print(f"\n===== {datetime.now():%Y-%m-%d %H:%M:%S} =====")
             print("다른 발행이 진행 중(락 존재). 이번 실행은 건너뜁니다.")
             return
+        # 실제로 지운다. 예전엔 메시지만 찍고 남겨둬서 아래 O_EXCL 이 영원히 실패했다
+        # (2026-08-11 브라우저가 죽으며 남긴 락 하나로 발행이 사흘 멈췄다).
         print("오래된 락 발견 — 죽은 프로세스로 보고 제거.")
+        try:
+            LOCK.unlink()
+        except OSError:
+            pass
     try:
         fd = os.open(str(LOCK), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.write(fd, str(os.getpid()).encode())

@@ -219,8 +219,23 @@ def t_parser():
     ghost = [{"draft": "(전체 삭제)", "ok": False, "reason": "images_failed"}] * 5
     check("없는 초안은 무시", sch._repeatedly_failing(ghost, set()) == set())
 
+    # 죽은 프로세스가 남긴 락은 실제로 지워져야 한다(안 지우면 발행이 영구 정지)
+    import os as _os, time as _time, tempfile as _tf
+    _lock_bak, _run_bak = sch.LOCK, sch._run
+    with _tf.TemporaryDirectory() as td:
+        sch.LOCK = _P(td) / ".publish.lock"
+        sch.LOCK.write_text("99999")
+        _old = _time.time() - sch.LOCK_STALE_SEC - 60
+        _os.utime(sch.LOCK, (_old, _old))
+        calls = []
+        sch._run = lambda dry_run=True: calls.append(dry_run)
+        try:
+            sch.run(dry_run=False)
+        finally:
+            sch.LOCK, sch._run = _lock_bak, _run_bak
+        check("죽은 락이면 발행 진행", calls == [False], calls)
+
     # 주기 판정: 기록 없으면 '오래됨', 오늘 기록이면 '아님'
-    import tempfile as _tf
     from datetime import date as _dt
     with _tf.TemporaryDirectory() as td:
         s = _P(td) / "stamp"
