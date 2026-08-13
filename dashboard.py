@@ -1045,7 +1045,16 @@ def run_diagnostics(d) -> list[dict]:
             if v:
                 break
             zeros += 1
-        if zeros >= 2:
+        # 🔴 아래 판정은 전부 '최신 레코드 = 어제'를 전제한다. 수집이 멈추면 옛 수치가
+        # '어제'로 둔갑한다 — 2026-08-13, 락으로 나흘 끊겼는데 진단은 8/09 의 3명을
+        # '어제 3명 · 정상'이라고 말했다. 그래서 날짜를 먼저 대조한다.
+        lag = (date.today() - date.fromisoformat(days[-1])).days
+        if lag >= 2:
+            add("검색 유입", "bad",
+                f"**{lag}일째 수집 안 됨** (마지막 {days[-1]}: {vals[-1]}명 / 최근 7건: {trend})",
+                "그동안의 유입은 알 수 없습니다. python metrics.py collect --ranks 로 수집하세요"
+                "(어드바이저는 직전 2일치만 주므로 그보다 오래된 날은 복구 불가)")
+        elif zeros >= 2:
             add("검색 유입", "bad", f"**{zeros}일 연속 0명** (최근 7일: {trend})",
                 "발행글은 건드리지 말 것(경고만 걸려 있고 차단은 아님). 새 글만 올리며 회복 관찰")
         elif zeros == 1:

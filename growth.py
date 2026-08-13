@@ -144,12 +144,20 @@ def visitor_trend() -> dict:
     days = sorted(vis)
     totals = [vis[d].get("total") for d in days if isinstance(vis[d].get("total"), int)]
     out = {"days": len(totals), "latest_total": totals[-1] if totals else None,
-           "recent_new_per_day": None, "label": "데이터 축적 중"}
+           "recent_new_per_day": None, "label": "데이터 축적 중",
+           "as_of": days[-1] if days else None, "lag": None}
     if len(totals) >= 3:
         span = min(7, len(totals) - 1)
         new = (totals[-1] - totals[-1 - span]) / span
         out["recent_new_per_day"] = round(new, 1)
         out["label"] = "상승" if new > 0.5 else ("하락" if new < -0.5 else "보합")
+    # 인덱스로만 계산해서 수집이 멈춰도 같은 '최근'을 반복한다. 2026-08-13 에는 나흘
+    # 묵은 데이터로 '상승 +1.7/일'이라고 말하고 있었다. 며칠 기준인지 함께 돌려주고,
+    # 끊긴 동안은 추세를 주장하지 않는다(자가 튜닝도 이 label 로 판단한다).
+    if days:
+        out["lag"] = (date.today() - date.fromisoformat(days[-1])).days
+        if out["lag"] >= 2:
+            out["label"] = f"알 수 없음(수집 {out['lag']}일 끊김)"
     return out
 
 
@@ -605,7 +613,8 @@ def report() -> str:
              f"세그먼트 성과(관측): a={segs['a']:.2f} b={segs['b']:.2f} c={segs['c']:.2f} (1=최고)",
              f"방문자 추세: {vt['label']}"
              + (f" (최근 +{vt['recent_new_per_day']}/일, 누적 {vt['latest_total']})"
-                if vt['recent_new_per_day'] is not None else f" (누적 {vt['latest_total']})"),
+                if vt['recent_new_per_day'] is not None else f" (누적 {vt['latest_total']})")
+             + (f"  ※{vt['as_of']} 기준" if vt.get("lag") else ""),
              f"순위→방문자 상관: {rv['corr'] if rv['corr'] is not None else rv['note']}",
              f"현재 가중치: " + " ".join(f"{k}={w[k]:.2f}" for k in DEFAULT_WEIGHTS),
              f"다음 추천 발행: {next_draft()}",

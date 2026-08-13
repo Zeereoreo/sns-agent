@@ -382,6 +382,54 @@ def t_index_gate():
 
 
 def t_user_keywords():
+    section("지표 신선도 — 묵은 데이터를 '어제'라고 말하면 안 된다")
+    # 2026-08-13: 락으로 나흘 수집이 끊겼는데 진단은 8/09 수치를 '어제 3명 · 정상'
+    # 이라 했고, 엔진은 '방문자 추세 상승'이라 했다. 둘 다 날짜를 안 봤다.
+    import json as _js, tempfile as _tf2, growth as _gr, dashboard as _db
+    from datetime import date as _d, timedelta as _td
+    from pathlib import Path as _P2
+
+    def _fresh(n):     # n일 전을 마지막 레코드로 갖는 합성 metrics
+        ds = [str(_d.today() - _td(days=n + k)) for k in range(4, -1, -1)]
+        return {"visitors": {d: {"today": 1, "total": 50 + i} for i, d in enumerate(ds)},
+                "search_inflow": {d: {"cv": 3, "uv": 2, "search": 3} for d in ds}}
+
+    _mbak = _gr.METRICS
+    with _tf2.TemporaryDirectory() as td:
+        try:
+            _gr.METRICS = _P2(td) / "m.json"
+            _gr.METRICS.write_text(_js.dumps(_fresh(1)), encoding="utf-8")
+            check("어제까지 있으면 추세를 말한다", _gr.visitor_trend()["label"] in ("상승", "보합", "하락"))
+            _gr.METRICS.write_text(_js.dumps(_fresh(4)), encoding="utf-8")
+            vt = _gr.visitor_trend()
+            check("나흘 끊기면 추세 주장 안 함", vt["label"].startswith("알 수 없음"), vt["label"])
+            check("끊긴 일수를 알려준다", vt["lag"] == 4, vt["lag"])
+        finally:
+            _gr.METRICS = _mbak
+    # 진단도 같은 기준인가 — 묵은 유입 데이터에 초록불을 켜면 안 된다
+    def _inflow_check(days_old):
+        bak = _db.ROOT
+        with _tf2.TemporaryDirectory() as td2:
+            try:
+                _db.ROOT = _P2(td2)
+                (_db.ROOT / "data").mkdir()
+                (_db.ROOT / "data" / "metrics.json").write_text(
+                    _js.dumps(_fresh(days_old)), encoding="utf-8")
+                stub = {"tasks": [], "done": 0, "total": 0, "days_left": 99,
+                        "images": {"pool": 1, "inbox": 0}}
+                got = [c for c in _db.run_diagnostics(stub) if c["name"] == "검색 유입"]
+            finally:
+                _db.ROOT = bak
+        return got[0] if got else None
+
+    c1 = _inflow_check(1)
+    check("어제 유입 있으면 정상", c1 and c1["level"] == "ok", c1 and c1["detail"])
+    c4 = _inflow_check(4)
+    check("나흘 끊기면 문제로 잡는다", c4 and c4["level"] == "bad", c4 and c4["detail"])
+    check("끊긴 것을 '어제'라 하지 않는다",
+          c4 and "수집 안 됨" in c4["detail"] and not c4["detail"].startswith("어제"),
+          c4 and c4["detail"])
+
     section("운영자 타깃 키워드(대시보드 추가)")
     import config
     import growth
