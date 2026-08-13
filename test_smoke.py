@@ -183,6 +183,14 @@ def t_parser():
     import metrics as _mt
     import opportunity as _op
     check("순위 측정 기본이 모바일", "m.search.naver.com" in inspect.getsource(_mt._rank_of))
+    # 블로그 결과 0 을 전부 '수집 실패'로 버리면 안 된다 — 페이지가 멀쩡한데 블로그
+    # 영역이 없는 판(쇼핑·플레이스)이 따로 있다(2026-08-13 실측: led 피켓·아이스버킷).
+    _src = inspect.getsource(_mt.collect)
+    check("판 없음과 수집 실패를 구분", "no_blog" in _src and "page_ok" in _src)
+    check("판 없음도 기록으로 남긴다", "serp_no_blog" in _src)
+    check("_rank_of 가 페이지 정상 여부를 반환", "page_ok" in inspect.getsource(_mt.collect)
+          and _mt._rank_of.__annotations__.get("return") is not None)
+    check("정상 페이지 판정 기준 존재", _mt.PAGE_OK_ANCHORS >= 20, _mt.PAGE_OK_ANCHORS)
     check("기회 SERP 가 모바일", "m.search.naver.com" in inspect.getsource(_op._serp))
     check("유입 검색어 수집 함수", callable(_mt._inflow_queries))
 

@@ -96,9 +96,19 @@ def _visitor_counts(page) -> dict:
             "total": int(m.group(2).replace(",", ""))}
 
 
-def _rank_of(page, keyword: str, blog: str, mobile: bool = True) -> tuple[int | None, int]:
-    """(순위, SERP에서 확인된 블로그 결과 수) 반환.
-    결과 수가 0이면 스크래핑 실패/차단 가능성 → 호출측이 '순위 이탈'로 오기록하지 않는다.
+PAGE_OK_ANCHORS = 50   # 실측: 정상 SERP 는 a태그 211~284개. 못 열리면 0에 가깝다.
+
+
+def _rank_of(page, keyword: str, blog: str,
+             mobile: bool = True) -> tuple[int | None, int, bool]:
+    """(순위, SERP에서 확인된 블로그 결과 수, 페이지가 정상으로 열렸는지) 반환.
+
+    ★세 번째 값이 필요한 이유(2026-08-13 실측): 블로그 결과 0 을 전부 '스크래핑
+    실패'로 버리고 있었는데(하루 33%), 실제로 열어 보니 페이지는 멀쩡했다.
+    `led 피켓`·`아이스버킷`·`응원 피켓` 은 **모바일 SERP 에 블로그 영역 자체가 없다** —
+    결과가 쇼핑·플레이스·광고(ledpicket.com, cr3.shopping, ader.naver)뿐이다.
+    즉 '못 쟀다'가 아니라 **'블로그로는 먹을 수 없는 판'** 이라는 실측 정보였다.
+    이걸 실패로 버리면 그 키워드는 '미측정=기회'로 남아 큐를 잘못된 판으로 민다.
 
     ★기본을 **모바일**로 둔다(2026-07-30). 실측 유입 referrer 가 거의 전부
     `m.search.naver.com` 이었는데 우리는 PC SERP 로만 순위를 재고 있었다 —
@@ -110,8 +120,8 @@ def _rank_of(page, keyword: str, blog: str, mobile: bool = True) -> tuple[int | 
         page.goto(url, timeout=30000)
         page.wait_for_timeout(1500)
     except Exception:
-        return None, 0
-    order = page.evaluate("""() => {
+        return None, 0, False
+    res = page.evaluate("""() => {
       const seen=new Set(), out=[];
       for (const a of document.querySelectorAll('a')) {
         const h=a.href||'';
@@ -121,11 +131,11 @@ def _rank_of(page, keyword: str, blog: str, mobile: bool = True) -> tuple[int | 
         const id=m[1];
         if(!seen.has(id)){ seen.add(id); out.push(id); }
       }
-      return out;
+      return {ids: out, anchors: document.querySelectorAll('a').length};
     }""")
-    order = [x for x in order if x not in _NOISE_IDS]
+    order = [x for x in res["ids"] if x not in _NOISE_IDS]
     rank = (order.index(blog) + 1) if blog in order else None
-    return rank, len(order)
+    return rank, len(order), res["anchors"] >= PAGE_OK_ANCHORS
 
 
 def _search_inflow(page, blog: str) -> dict | None:
@@ -400,7 +410,15 @@ def collect(force_ranks: bool = False) -> dict:
             print(f"[방문자] 오늘 {vc['today']} / 전체 {vc['total']}")
 
         # 발행글 대표 키워드 + 운영자가 대시보드에서 추가한 키워드(초안이 없어도 추적한다).
-        targets = list(kw_map.items())
+        # 🔴 키워드 단위로 중복을 뺀다. 같은 키워드를 여러 초안이 공유하면(아이스버킷 7편)
+        # 같은 검색을 그만큼 반복한다 — 2026-08-13 수집에서 '아이스버킷'을 5번 조회하고
+        # 5번 다 실패했다. 낭비일 뿐 아니라 동일 쿼리 연타라 차단을 자초한다.
+        targets, _seen_kw = [], set()
+        for name, kw in kw_map.items():
+            if kw in _seen_kw:
+                continue
+            _seen_kw.add(kw)
+            targets.append((name, kw))
         for kw in config.load_keywords():
             if kw not in kw_map.values():
                 targets.append((f"(직접 추가) {kw}", kw))
@@ -432,20 +450,26 @@ def collect(force_ranks: bool = False) -> dict:
                         targets.append((f"(실측 유입) {_c}", _c))
 
         if need_ranks and targets:
-            ranks, failures = {}, 0
+            ranks, failures, no_blog = {}, 0, []
             for name, kw in targets:
-                r, n_results = _rank_of(page, kw, blog)
-                if r is None and n_results == 0:
+                r, n_results, page_ok = _rank_of(page, kw, blog)
+                if r is None and n_results == 0 and not page_ok:
                     # 🔴 2026-08-06 실측: 하루 41건 중 11건(27%)이 여기서 버려지고 있었다.
                     # 연속 요청이 몰릴 때 나는 일시적 실패라 **한 번 쉬었다 재시도**하면
                     # 상당수가 살아난다. 버려진 키워드는 승산 신호에서 통째로 빠지고
                     # 그만큼 큐 순서가 부정확해진다.
+                    # (페이지가 정상으로 열렸으면 재시도해도 같으므로 쉬지 않는다.)
                     page.wait_for_timeout(2500)
-                    r, n_results = _rank_of(page, kw, blog)
+                    r, n_results, page_ok = _rank_of(page, kw, blog)
                 if r is None and n_results == 0:
-                    # 재시도해도 비었으면 스크래핑 실패/차단. '이탈'로 기록하지 않고 건너뜀.
-                    failures += 1
-                    print(f"[순위] '{kw}' -> 수집 실패(재시도 후에도 SERP 비어있음), 기록 안 함")
+                    if page_ok:
+                        # SERP 는 멀쩡한데 블로그 결과가 0 = 블로그 노출 자리가 없는 판
+                        # (쇼핑·플레이스·광고만). 여기선 1위를 해도 유입이 안 생긴다.
+                        no_blog.append(kw)
+                        print(f"[순위] '{kw}' -> 블로그 영역 없는 판(쇼핑·플레이스) — 순위 불가")
+                    else:
+                        failures += 1
+                        print(f"[순위] '{kw}' -> 수집 실패(SERP 안 열림), 기록 안 함")
                     continue
                 ranks[kw] = r
                 print(f"[순위] '{kw}' -> {r if r else '30위권 밖'}")
@@ -455,6 +479,9 @@ def collect(force_ranks: bool = False) -> dict:
                 data.setdefault("ranks", {})[today] = ranks
             else:
                 print(f"[순위] 전건 수집 실패({failures}) — 오늘 순위 기록 보류.")
+            if no_blog:
+                data.setdefault("serp_no_blog", {})[today] = no_blog
+                print(f"[순위] 블로그 영역 없는 판 {len(no_blog)}개: {', '.join(no_blog)}")
         elif not need_ranks:
             print("[순위] 오늘 이미 수집됨(건너뜀). 강제: --ranks")
 
