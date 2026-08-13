@@ -219,6 +219,19 @@ def t_parser():
     ghost = [{"draft": "(전체 삭제)", "ok": False, "reason": "images_failed"}] * 5
     check("없는 초안은 무시", sch._repeatedly_failing(ghost, set()) == set())
 
+    # '실패'가 아니라 '아예 안 돌았다'도 경고로 잡아야 한다(락 사흘 정지의 교훈)
+    from datetime import datetime as _dtm, timedelta as _tdl
+    def _log_at(hours_ago, ok=True):
+        t = _dtm.now() - _tdl(hours=hours_ago)
+        return [{"date": t.strftime("%Y-%m-%d"), "time": t.strftime("%H:%M"),
+                 "draft": "x.md", "ok": ok, "dry": False}]
+    check("최근 발행은 정체 아님", sch._stalled_hours(_log_at(3)) < 4)
+    check("이틀 무기록은 정체", sch._stalled_hours(_log_at(48)) >= sch.STALL_HOURS)
+    check("dry-run 은 발행으로 안 셈",
+          sch._stalled_hours([{"date": "2026-01-01", "time": "09:00", "dry": True}]) is None)
+    check("기록 없으면 None", sch._stalled_hours([]) is None)
+    check("성공만 있어도 오래되면 연속실패는 0", sch._consecutive_failures(_log_at(72)) == 0)
+
     # 죽은 프로세스가 남긴 락은 실제로 지워져야 한다(안 지우면 발행이 영구 정지)
     import os as _os, time as _time, tempfile as _tf
     _lock_bak, _run_bak = sch.LOCK, sch._run

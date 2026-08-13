@@ -92,6 +92,8 @@ LOCK = ROOT / "data" / ".publish.lock"
 LOCK_STALE_SEC = 25 * 60   # 이보다 오래된 락은 죽은 프로세스로 간주
 
 ALERT_AFTER = 2   # 연속 실패가 이 횟수 이상이면 바탕화면 경고를 남긴다
+# 하루 3편 발행이므로 24시간 무기록이면 최소 3슬롯이 조용히 날아간 것이다.
+STALL_HOURS = 24
 
 
 FAIL_SKIP_AFTER = 3
@@ -136,11 +138,38 @@ def _consecutive_failures(log: list) -> int:
     return n
 
 
+def _stalled_hours(log: list) -> float | None:
+    """마지막 실제 발행 기록으로부터 지난 시간(시간 단위). 기록이 없으면 None."""
+    for e in reversed(log):
+        if e.get("dry"):
+            continue
+        try:
+            t = datetime.strptime(f"{e['date']} {e['time']}", "%Y-%m-%d %H:%M")
+        except (KeyError, ValueError):
+            return None
+        return (datetime.now() - t).total_seconds() / 3600
+    return None
+
+
 def _update_alert_file(log: list) -> None:
     """연속 실패가 쌓이면 바탕화면 경고를 남기고, 발행이 복구되면 치운다."""
     import notify  # noqa: PLC0415
     fails = _consecutive_failures(log)
+    # 🔴 '실패'는 로그에 남지만 '아예 시도되지 않음'은 아무것도 안 남긴다. 그래서
+    # 연속실패 카운터는 0 이 되고, 마지막 기록이 성공이면 경고를 오히려 지운다.
+    # 2026-08-11~13 락 하나로 사흘 멈췄을 때 정확히 이 구멍으로 아무도 몰랐다.
     if fails < ALERT_AFTER:
+        stall = _stalled_hours(log)
+        if stall is not None and stall >= STALL_HOURS:
+            last = next(e for e in reversed(log) if not e.get("dry"))
+            notify.write_alert(
+                f"SNS Agent 발행이 {stall / 24:.1f}일째 기록되지 않았습니다.\n"
+                f"마지막 발행: {last.get('date')} {last.get('time')} ({last.get('draft')})\n\n"
+                f"실패가 아니라 '실행 자체가 안 되는' 상태일 수 있습니다.\n"
+                f"  cd {ROOT}\n"
+                f"  .\\.venv\\Scripts\\python.exe diagnostics.py\n\n"
+                f"발행이 재개되면 이 파일은 자동으로 사라집니다.\n")
+            return
         notify.clear_alert()
         return
     last = next(e for e in reversed(log) if not e.get("dry"))
@@ -159,6 +188,12 @@ def run(dry_run: bool = True) -> None:
     if dry_run:
         return _run(dry_run=True)
     LOCK.parent.mkdir(exist_ok=True)
+    # 아래 경로들은 _run() 을 안 부르고 빠져나가므로 경고 갱신도 건너뛴다.
+    # 발행이 멈춘 채 조용해지는 게 바로 그 경우라 여기서 먼저 점검한다.
+    try:
+        _update_alert_file(_load_state()["log"])
+    except Exception as ex:
+        print("경고 갱신 실패:", ex)
     if LOCK.exists():
         try:
             age = time.time() - LOCK.stat().st_mtime
